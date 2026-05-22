@@ -1,0 +1,8 @@
+# requirements.txt
+fastapi
+uvicorn
+anthropic
+python-dotenv
+Pillow
+httpx
+google-generativeai
