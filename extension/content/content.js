@@ -65,16 +65,27 @@ function refreshTextBlocks() {
     
     textBlocks = Array.from(allElements).filter(el => {
         const text = el.innerText ? el.innerText.trim() : "";
-        if (text.length === 0) return false;
 
+        // Must have meaningful content — skip short labels, numbers, badges
+        if (text.length < 2) return false;
+
+        // Skip our own injected captions
+        if (el.classList.contains('accessin-caption')) return false;
+
+        // Skip UI chrome
         if (el.closest('button, nav, header, footer, [role="button"], [role="navigation"], .global-nav, .search-global-typeahead')) {
             return false;
         }
 
-        if (el.tagName.toLowerCase() === 'p' && text.length > 0) return true;
-        if (text.length > 15) return true;
+        // Skip notification badges, counters, reaction counts
+        if (/^\d+$/.test(text)) return false;
 
-        return false;
+        // Skip elements that are inside image containers
+        if (el.closest('figure, [data-view-name*="image"], .feed-shared-image, .update-components-image')) {
+            return false;
+        }
+
+        return true;
     });
 }
 
@@ -116,8 +127,11 @@ function findNearestItem(direction) {
         if (direction === 'right' && ex > cx + 10) isValidDirection = true;
 
         if (isValidDirection) {
-            // Pythagorean theorem to find the closest straight-line distance
-            const distance = Math.sqrt(Math.pow(ex - cx, 2) + Math.pow(ey - cy, 2));
+            // Weight vertical distance less than horizontal so navigation
+            // stays in the reading flow (top-to-bottom) rather than jumping sideways
+            const dx = ex - cx;
+            const dy = ey - cy;
+            const distance = Math.sqrt(Math.pow(dx * 0.5, 2) + Math.pow(dy, 2));
             if (distance < minDistance) {
                 minDistance = distance;
                 bestIndex = index;
@@ -162,6 +176,10 @@ function readItemAt(index) {
 
 function speakText(text) {
     let cleanText = text.replace(/Like|Comment|Share|Send|Reply/g, '').trim();
+    
+    // If nothing meaningful to read, don't speak (avoids silent jumps)
+    if (!cleanText || cleanText.length < 2) return;
+
     const utterance = new SpeechSynthesisUtterance(cleanText);
     utterance.rate = currentSpeed;
     
