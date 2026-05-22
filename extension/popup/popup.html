@@ -1,19 +1,34 @@
 <!DOCTYPE html>
-<html>
-
+<html lang="en">
 <head>
+    <meta charset="UTF-8" />
     <link rel="stylesheet" href="popup.css" />
 </head>
-
 <body>
     <div class="container">
-        <p class="label">What's your goal for this session?</p>
-        <input type="text" id="intentInput" placeholder="e.g. apply to 2 jobs" />
-        <button id="setBtn">Lock in focus</button>
-        <button id="clearBtn">Clear & unlock</button>
-        <div id="status"></div>
+
+        <!-- Focus Lock -->
+        <section class="section">
+            <p class="label">🎯 Session Focus</p>
+            <input type="text" id="intentInput" placeholder="e.g. apply to 2 jobs" />
+            <div class="row">
+                <button id="setBtn">Lock in</button>
+                <button id="clearBtn" class="secondary">Clear</button>
+            </div>
+            <div id="status" class="status"></div>
+        </section>
+
+        <hr />
+
+        <!-- Job Analyzer -->
+        <section class="section">
+            <p class="label">🧠 Analyze Job Posting</p>
+            <p class="hint">Open a LinkedIn job page, then click below.</p>
+            <button id="analyzeBtn">Analyze this job</button>
+            <div id="analyzeStatus" class="status"></div>
+        </section>
+
     </div>
     <script src="popup.js"></script>
 </body>
-
 </html>
