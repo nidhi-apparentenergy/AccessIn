@@ -251,3 +251,64 @@ alertColorPicker.addEventListener('input', () => {
         });
     });
 });
+
+document.getElementById('testFlashBtn').addEventListener('click', async () => {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) {
+        setStatus('alertStatus', 'No active tab found.', 'error');
+        return;
+    }
+
+    const color = alertColorPicker.value || '#0a66c2';
+
+    try {
+        // Try content script first (fast path)
+        chrome.tabs.sendMessage(tab.id, { type: 'TEST_FLASH' }, () => {
+            void chrome.runtime.lastError; // suppress error if not loaded
+        });
+
+        // Always also inject directly via scripting API as guaranteed fallback
+        await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            func: (flashColor) => {
+                // Remove old overlay
+                document.getElementById('accessin-flash-overlay-test')?.remove();
+
+                // Inject keyframes if not already present
+                if (!document.getElementById('accessin-alert-styles')) {
+                    const s = document.createElement('style');
+                    s.id = 'accessin-alert-styles-test';
+                    s.textContent = `
+                        @keyframes accessin-flash {
+                            0%   { opacity: 0.55; }
+                            40%  { opacity: 0.55; }
+                            100% { opacity: 0; }
+                        }
+                        #accessin-flash-overlay-test {
+                            pointer-events: none;
+                            position: fixed;
+                            inset: 0;
+                            z-index: 2147483646;
+                            opacity: 0;
+                            animation: accessin-flash 700ms ease-out forwards;
+                        }
+                    `;
+                    document.head.appendChild(s);
+                }
+
+                const overlay = document.createElement('div');
+                overlay.id = 'accessin-flash-overlay-test';
+                overlay.style.background = flashColor;
+                document.body.appendChild(overlay);
+                overlay.addEventListener('animationend', () => overlay.remove(), { once: true });
+            },
+            args: [color],
+        });
+
+        setStatus('alertStatus', 'Flash sent! ⚡', 'success');
+        setTimeout(() => setStatus('alertStatus', '', ''), 2000);
+
+    } catch (err) {
+        setStatus('alertStatus', `Error: ${err.message}`, 'error');
+    }
+});
