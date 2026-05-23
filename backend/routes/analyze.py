@@ -11,6 +11,7 @@ Accepts a raw LinkedIn job description and uses Gemini to:
 
 import json
 import os
+import time
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -113,19 +114,42 @@ async def analyze_job_description(req: AnalyzeRequest):
     if not api_key:
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY not configured")
 
+    # Try gemini-2.5-flash first (best quality), fall back to lighter models
+    # if the primary is overloaded or unavailable.
+    MODELS_TO_TRY = [
+        "gemini-2.5-flash",
+        "gemini-2.0-flash",
+        "gemini-2.0-flash-lite",
+    ]
+
     try:
         client = genai.Client(api_key=api_key)
 
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=f"Analyze this job description:\n\n{req.job_description}",
-            config=genai.types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT,
-                temperature=0.3,
-                max_output_tokens=8192,
-                response_mime_type="application/json",
-            ),
-        )
+        response = None
+        last_error = None
+        for model_name in MODELS_TO_TRY:
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=f"Analyze this job description:\n\n{req.job_description}",
+                    config=genai.types.GenerateContentConfig(
+                        system_instruction=SYSTEM_PROMPT,
+                        temperature=0.3,
+                        max_output_tokens=8192,
+                        response_mime_type="application/json",
+                    ),
+                )
+                break  # success — stop trying
+            except Exception as model_err:
+                last_error = model_err
+                err_str = str(model_err).lower()
+                if "503" in err_str or "unavailable" in err_str or "overloaded" in err_str or "quota" in err_str:
+                    time.sleep(1)
+                    continue  # try next model
+                raise  # other errors re-raised immediately
+
+        if response is None:
+            raise last_error
 
         raw_text = response.text.strip()
 

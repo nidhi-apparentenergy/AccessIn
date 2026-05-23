@@ -9,6 +9,7 @@ return a plain-English description optimised for screen readers.
 import base64
 import json
 import os
+import time
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -75,6 +76,13 @@ async def describe_image(req: DescribeRequest):
     except Exception:
         raise HTTPException(status_code=422, detail="image_b64 is not valid base64")
 
+    # Try gemini-2.5-flash first (supports vision), fall back if unavailable.
+    MODELS_TO_TRY = [
+        "gemini-2.5-flash",
+        "gemini-2.0-flash",
+        "gemini-2.0-flash-lite",
+    ]
+
     try:
         client = genai.Client(api_key=api_key)
 
@@ -84,15 +92,30 @@ async def describe_image(req: DescribeRequest):
         if req.context:
             parts.append(types.Part.from_text(text=f"Surrounding context: {req.context}"))
 
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=types.Content(role="user", parts=parts),
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT,
-                temperature=0.2,
-                max_output_tokens=512,
-            ),
-        )
+        response = None
+        last_error = None
+        for model_name in MODELS_TO_TRY:
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=types.Content(role="user", parts=parts),
+                    config=types.GenerateContentConfig(
+                        system_instruction=SYSTEM_PROMPT,
+                        temperature=0.2,
+                        max_output_tokens=512,
+                    ),
+                )
+                break  # success — stop trying
+            except Exception as model_err:
+                last_error = model_err
+                err_str = str(model_err).lower()
+                if "503" in err_str or "unavailable" in err_str or "overloaded" in err_str or "quota" in err_str:
+                    time.sleep(1)
+                    continue  # try next model
+                raise  # other errors re-raised immediately
+
+        if response is None:
+            raise last_error
 
         raw = response.text.strip()
 
