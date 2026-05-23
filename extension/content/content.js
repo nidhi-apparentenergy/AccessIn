@@ -924,6 +924,15 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         sendResponse({ ok: true });
         return true;
     }
+    if (msg.type === 'GET_PROFILE_CONTENT') {
+        sendResponse({ profile: extractProfileContent() });
+        return true;
+    }
+    if (msg.type === 'INJECT_PROFILE_SCORE') {
+        injectProfileScorePanel(msg.data);
+        sendResponse({ ok: true });
+        return true;
+    }
     if (msg.type === 'APPLY_READING_PREFS') {
         applyReadingPrefs(msg.prefs);
         sendResponse({ ok: true });
@@ -1414,3 +1423,300 @@ window.setTimeout(() => {
         }
     });
 }, 1000);
+
+// ==========================================
+// FEATURE 5: PROFILE ACCESSIBILITY SCORE
+// Extracts LinkedIn profile content and injects
+// an accessibility score panel on the page.
+// ==========================================
+
+function extractProfileContent() {
+    const profile = {};
+
+    // ── Name ─────────────────────────────────────────────────────────────────
+    // Try every known LinkedIn h1 pattern
+    const nameEl =
+        document.querySelector('h1.text-heading-xlarge') ||
+        document.querySelector('h1[class*="heading"]') ||
+        document.querySelector('h1[class*="title"]') ||
+        document.querySelector('.pv-top-card--list h1') ||
+        document.querySelector('main h1');
+    profile.name = nameEl?.innerText?.trim() || '';
+
+    // ── Headline ──────────────────────────────────────────────────────────────
+    // The headline sits right below the name — grab the first non-empty div/span
+    // after the h1 that isn't a location or connection count
+    const headlineEl =
+        document.querySelector('.text-body-medium.break-words') ||
+        document.querySelector('[data-generated-suggestion-target]') ||
+        document.querySelector('.pv-top-card-section__headline') ||
+        document.querySelector('[class*="top-card"] [class*="headline"]') ||
+        document.querySelector('[class*="profile-info"] [class*="subtitle"]');
+
+    // Fallback: second meaningful text node after h1
+    if (!headlineEl && nameEl) {
+        let sibling = nameEl.nextElementSibling;
+        while (sibling) {
+            const t = sibling.innerText?.trim();
+            if (t && t.length > 5 && !/^\d+/.test(t)) {
+                profile.headline = t;
+                break;
+            }
+            sibling = sibling.nextElementSibling;
+        }
+    } else {
+        profile.headline = headlineEl?.innerText?.trim() || '';
+    }
+
+    // ── About ─────────────────────────────────────────────────────────────────
+    // Strategy 1: anchor by #about id
+    const aboutAnchor = document.getElementById('about');
+    if (aboutAnchor) {
+        const section = aboutAnchor.closest('section') || aboutAnchor.parentElement;
+        const text = section?.innerText?.replace(/^About\s*/i, '').trim();
+        if (text && text.length > 10) {
+            profile.about = text.slice(0, 3000);
+        }
+    }
+
+    // Strategy 2: data-view-name
+    if (!profile.about) {
+        const aboutSection =
+            document.querySelector('[data-view-name*="profile-card-about"]') ||
+            document.querySelector('[data-view-name*="about"]');
+        const text = aboutSection?.innerText?.replace(/^About\s*/i, '').trim();
+        if (text && text.length > 10) profile.about = text.slice(0, 3000);
+    }
+
+    // Strategy 3: find any section whose heading says "About"
+    if (!profile.about) {
+        const headings = Array.from(document.querySelectorAll('h2, h3, span[class*="title"]'));
+        for (const h of headings) {
+            if (h.innerText?.trim().toLowerCase() === 'about') {
+                const section = h.closest('section') || h.parentElement?.parentElement;
+                const text = section?.innerText?.replace(/^About\s*/i, '').trim();
+                if (text && text.length > 10) {
+                    profile.about = text.slice(0, 3000);
+                    break;
+                }
+            }
+        }
+    }
+
+    // ── Experience ────────────────────────────────────────────────────────────
+    const expAnchor = document.getElementById('experience');
+    if (expAnchor) {
+        const section = expAnchor.closest('section') || expAnchor.parentElement;
+        const text = section?.innerText?.replace(/^Experience\s*/i, '').trim();
+        if (text && text.length > 10) profile.experience = text.slice(0, 3000);
+    }
+
+    if (!profile.experience) {
+        const expSection =
+            document.querySelector('[data-view-name*="profile-card-experience"]') ||
+            document.querySelector('[data-view-name*="experience"]');
+        const text = expSection?.innerText?.replace(/^Experience\s*/i, '').trim();
+        if (text && text.length > 10) profile.experience = text.slice(0, 3000);
+    }
+
+    // ── Last resort: grab the whole main profile card text ────────────────────
+    // If we still have nothing useful, pull from the main content area
+    if (!profile.headline && !profile.about) {
+        const mainContent =
+            document.querySelector('main') ||
+            document.querySelector('[class*="scaffold-layout__main"]') ||
+            document.querySelector('[class*="profile-view"]');
+        if (mainContent) {
+            const fullText = mainContent.innerText?.trim().slice(0, 5000) || '';
+            if (fullText.length > 50) {
+                // Use it as the "about" so we have something to score
+                profile.about = fullText;
+            }
+        }
+    }
+
+    profile.profile_url = window.location.href;
+    return profile;
+}
+
+function removeProfileScorePanel() {
+    document.getElementById('accessin-profile-score-panel')?.remove();
+}
+
+function injectProfileScorePanel(data) {
+    removeProfileScorePanel();
+
+    // Grade color
+    const gradeColor = {
+        A: '#27ae60', B: '#2ecc71', C: '#e67e22', D: '#e74c3c', F: '#c0392b'
+    }[data.grade] || '#888';
+
+    // Score ring color
+    const ringColor = data.overall_score >= 85 ? '#27ae60'
+        : data.overall_score >= 70 ? '#2ecc71'
+        : data.overall_score >= 55 ? '#e67e22'
+        : data.overall_score >= 40 ? '#e74c3c' : '#c0392b';
+
+    // Breakdown rows
+    const breakdownHTML = (data.breakdown || []).map(item => {
+        const barColor = item.score >= 8 ? '#27ae60' : item.score >= 5 ? '#e67e22' : '#e74c3c';
+        const barWidth = (item.score / 10) * 100;
+        return `
+        <div class="aps-breakdown-row">
+            <div class="aps-breakdown-header">
+                <span class="aps-breakdown-cat">${escapeHTML(item.category)}</span>
+                <span class="aps-breakdown-score" style="color:${barColor}">${item.score}/10</span>
+            </div>
+            <div class="aps-bar-track">
+                <div class="aps-bar-fill" style="width:${barWidth}%;background:${barColor}"></div>
+            </div>
+            <div class="aps-breakdown-feedback">${escapeHTML(item.feedback)}</div>
+            <div class="aps-breakdown-tip">💡 ${escapeHTML(item.tip)}</div>
+        </div>`;
+    }).join('');
+
+    const winsHTML = (data.top_wins || []).map(w => `<li>✅ ${escapeHTML(w)}</li>`).join('');
+    const fixesHTML = (data.top_fixes || []).map(f => `<li>🔧 ${escapeHTML(f)}</li>`).join('');
+
+    const panel = document.createElement('div');
+    panel.id = 'accessin-profile-score-panel';
+    panel.innerHTML = `
+        <style>
+            #accessin-profile-score-panel {
+                position: fixed;
+                top: 72px;
+                right: 24px;
+                bottom: 24px;
+                width: 380px;
+                max-width: calc(100vw - 32px);
+                z-index: 999999;
+                border: 2px solid #0a66c2;
+                border-radius: 12px;
+                font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+                font-size: 13px;
+                background: #fff;
+                box-shadow: 0 18px 48px rgba(0,0,0,0.22);
+                overflow: hidden;
+                box-sizing: border-box;
+                display: flex;
+                flex-direction: column;
+            }
+            .aps-header {
+                background: #0a66c2;
+                color: white;
+                padding: 12px 16px;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                flex-shrink: 0;
+            }
+            .aps-header-title { font-weight: 700; font-size: 14px; }
+            .aps-close {
+                cursor: pointer; background: rgba(255,255,255,0.2);
+                border: none; color: white; border-radius: 50%;
+                width: 26px; height: 26px; font-size: 14px;
+                display: flex; align-items: center; justify-content: center;
+            }
+            .aps-body {
+                flex: 1;
+                overflow-y: auto;
+                padding: 14px 16px 18px;
+                display: flex;
+                flex-direction: column;
+                gap: 14px;
+                box-sizing: border-box;
+            }
+            .aps-score-hero {
+                display: flex;
+                align-items: center;
+                gap: 16px;
+            }
+            .aps-score-ring {
+                width: 72px; height: 72px;
+                border-radius: 50%;
+                border: 5px solid ${ringColor};
+                display: flex; flex-direction: column;
+                align-items: center; justify-content: center;
+                flex-shrink: 0;
+            }
+            .aps-score-number {
+                font-size: 22px; font-weight: 800;
+                color: ${ringColor}; line-height: 1;
+            }
+            .aps-score-label { font-size: 10px; color: #888; }
+            .aps-grade-badge {
+                padding: 4px 14px; border-radius: 20px;
+                font-weight: 800; font-size: 18px;
+                color: white; background: ${gradeColor};
+                display: inline-block;
+            }
+            .aps-summary { font-size: 12px; color: #444; line-height: 1.6; }
+            .aps-section-title {
+                font-weight: 700; font-size: 11px; color: #0a66c2;
+                text-transform: uppercase; letter-spacing: 0.4px;
+                margin-bottom: 4px;
+            }
+            .aps-breakdown-row {
+                display: flex; flex-direction: column; gap: 3px;
+                padding: 8px 10px;
+                background: #f8f9fa;
+                border-radius: 6px;
+            }
+            .aps-breakdown-header {
+                display: flex; justify-content: space-between; align-items: center;
+            }
+            .aps-breakdown-cat { font-weight: 600; font-size: 12px; }
+            .aps-breakdown-score { font-weight: 700; font-size: 12px; }
+            .aps-bar-track {
+                height: 5px; background: #e0e0e0; border-radius: 3px; overflow: hidden;
+            }
+            .aps-bar-fill { height: 100%; border-radius: 3px; transition: width 0.4s; }
+            .aps-breakdown-feedback { font-size: 11px; color: #555; }
+            .aps-breakdown-tip { font-size: 11px; color: #0a66c2; }
+            ul.aps-list {
+                padding-left: 4px; margin: 0;
+                list-style: none;
+                display: flex; flex-direction: column; gap: 5px;
+            }
+            ul.aps-list li { font-size: 12px; color: #333; line-height: 1.5; }
+        </style>
+        <div class="aps-header">
+            <span class="aps-header-title">♿ Profile Accessibility Score</span>
+            <button class="aps-close" id="aps-close-btn" aria-label="Close panel">✕</button>
+        </div>
+        <div class="aps-body">
+            <div class="aps-score-hero">
+                <div class="aps-score-ring">
+                    <span class="aps-score-number">${escapeHTML(String(data.overall_score))}</span>
+                    <span class="aps-score-label">/ 100</span>
+                </div>
+                <div>
+                    <div style="margin-bottom:6px">
+                        <span class="aps-grade-badge">${escapeHTML(data.grade)}</span>
+                    </div>
+                    <div class="aps-summary">${escapeHTML(data.summary)}</div>
+                </div>
+            </div>
+
+            <div>
+                <div class="aps-section-title">📊 Breakdown</div>
+                <div style="display:flex;flex-direction:column;gap:6px">${breakdownHTML}</div>
+            </div>
+
+            ${winsHTML ? `
+            <div>
+                <div class="aps-section-title">🏆 What's working</div>
+                <ul class="aps-list">${winsHTML}</ul>
+            </div>` : ''}
+
+            ${fixesHTML ? `
+            <div>
+                <div class="aps-section-title">🔧 Top improvements</div>
+                <ul class="aps-list">${fixesHTML}</ul>
+            </div>` : ''}
+        </div>
+    `;
+
+    document.body.appendChild(panel);
+    document.getElementById('aps-close-btn').addEventListener('click', removeProfileScorePanel);
+}

@@ -5,7 +5,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routes import analyze, simplify, describe
+from routes import analyze, simplify, describe, profile_score
 
 # Load .env from the same directory as this file
 load_dotenv(Path(__file__).parent / ".env")
@@ -22,6 +22,7 @@ app.add_middleware(
 app.include_router(analyze.router)
 app.include_router(simplify.router)
 app.include_router(describe.router)
+app.include_router(profile_score.router)
 
 
 @app.get("/")
