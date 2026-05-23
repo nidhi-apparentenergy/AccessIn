@@ -372,33 +372,6 @@ function removeAnalysisPanel() {
 function injectAnalysisPanel(data) {
     removeAnalysisPanel();
 
-    // Find the job description container to inject after
-    const anchorSelectors = [
-        '.jobs-description__content',
-        '.jobs-description-content__text',
-        '.jobs-box__html-content',
-        '[class*="jobs-description"]',
-        '.description__text',
-    ];
-    let anchor = null;
-    for (const sel of anchorSelectors) {
-        anchor = document.querySelector(sel);
-        if (anchor) break;
-    }
-
-    // Fallback: inject after the "About the job" heading's container
-    if (!anchor) {
-        const headings = Array.from(document.querySelectorAll('h2, h3'));
-        for (const h of headings) {
-            if (h.innerText.trim().toLowerCase() === 'about the job') {
-                anchor = h.closest('section') || h.parentElement;
-                break;
-            }
-        }
-    }
-
-    if (!anchor) return;
-
     const scoreColor = data.sensory_load_score <= 3 ? '#27ae60'
         : data.sensory_load_score <= 6 ? '#e67e22' : '#c0392b';
 
@@ -428,47 +401,83 @@ function injectAnalysisPanel(data) {
     panel.innerHTML = `
         <style>
             #accessin-analysis-panel {
-                margin: 16px 0;
+                position: fixed;
+                top: 72px;
+                right: 24px;
+                bottom: 24px;
+                width: 420px;
+                max-width: calc(100vw - 32px);
+                min-width: 320px;
+                z-index: 999999;
                 border: 2px solid #0a66c2;
                 border-radius: 10px;
                 font-family: -apple-system, BlinkMacSystemFont, sans-serif;
                 font-size: 13px;
                 background: #fff;
+                box-shadow: 0 18px 48px rgba(0, 0, 0, 0.22);
                 overflow: hidden;
+                box-sizing: border-box;
+                color: #333;
             }
             .ain-header {
                 background: #0a66c2;
                 color: white;
-                padding: 10px 16px;
+                padding: 12px 16px;
                 display: flex;
                 align-items: center;
                 justify-content: space-between;
+                gap: 12px;
             }
-            .ain-header-title { font-weight: 700; font-size: 14px; }
+            .ain-header-title {
+                font-weight: 700;
+                font-size: 15px;
+                line-height: 1.3;
+                white-space: normal;
+            }
             .ain-close {
-                cursor: pointer; background: rgba(255,255,255,0.2);
-                border: none; color: white; border-radius: 50%;
-                width: 22px; height: 22px; font-size: 14px;
-                display: flex; align-items: center; justify-content: center;
+                flex: 0 0 auto;
                 cursor: pointer;
+                background: rgba(255,255,255,0.2);
+                border: none;
+                color: white;
+                border-radius: 50%;
+                width: 28px;
+                height: 28px;
+                font-size: 16px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
             }
-            .ain-body { padding: 12px 16px; display: flex; flex-direction: column; gap: 12px; }
-            .ain-score-row { display: flex; align-items: center; gap: 10px; }
+            .ain-body {
+                height: calc(100% - 52px);
+                padding: 14px 16px 18px;
+                display: flex;
+                flex-direction: column;
+                gap: 14px;
+                overflow-y: auto;
+                box-sizing: border-box;
+            }
+            .ain-score-row {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                flex-wrap: wrap;
+            }
             .ain-score-badge {
                 padding: 3px 12px; border-radius: 20px;
                 font-weight: 700; color: white; font-size: 13px;
                 background: ${scoreColor};
             }
             .ain-score-label { font-weight: 600; }
-            .ain-score-explain { font-size: 11px; color: #666; margin-top: 2px; }
+            .ain-score-explain { font-size: 12px; color: #555; margin-top: 4px; line-height: 1.5; }
             .ain-section { display: flex; flex-direction: column; gap: 6px; }
             .ain-title {
-                font-weight: 700; font-size: 11px; color: #0a66c2;
-                text-transform: uppercase; letter-spacing: 0.4px;
+                font-weight: 700; font-size: 12px; color: #0a66c2;
+                text-transform: uppercase; letter-spacing: 0.03em;
             }
-            .ain-summary { line-height: 1.6; color: #333; }
+            .ain-summary { line-height: 1.6; color: #333; overflow-wrap: anywhere; }
             ul.ain-list { padding-left: 18px; margin: 0; display: flex; flex-direction: column; gap: 4px; }
-            ul.ain-list li { line-height: 1.5; color: #333; }
+            ul.ain-list li { line-height: 1.5; color: #333; overflow-wrap: anywhere; }
             .ain-tags { display: flex; flex-wrap: wrap; gap: 5px; }
             .ain-tag {
                 background: #e8f0fe; color: #0a66c2;
@@ -483,6 +492,16 @@ function injectAnalysisPanel(data) {
             .ain-bias-phrase { font-weight: 700; color: #c0392b; font-size: 12px; }
             .ain-bias-issue { color: #555; font-size: 11px; }
             .ain-bias-fix { color: #27ae60; font-size: 11px; }
+            @media (max-width: 640px) {
+                #accessin-analysis-panel {
+                    top: 64px;
+                    right: 12px;
+                    left: 12px;
+                    bottom: 12px;
+                    width: auto;
+                    min-width: 0;
+                }
+            }
         </style>
         <div class="ain-header">
             <span class="ain-header-title">🧠 AccessIn — Job Analysis</span>
@@ -516,7 +535,7 @@ function injectAnalysisPanel(data) {
         </div>
     `;
 
-    anchor.insertAdjacentElement('afterend', panel);
+    document.body.appendChild(panel);
 
     document.getElementById('ain-close-btn').addEventListener('click', removeAnalysisPanel);
 }
