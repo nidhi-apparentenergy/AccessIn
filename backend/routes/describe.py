@@ -85,7 +85,7 @@ async def describe_image(req: DescribeRequest):
             parts.append(types.Part.from_text(text=f"Surrounding context: {req.context}"))
 
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-2.5-flash",
             contents=types.Content(role="user", parts=parts),
             config=types.GenerateContentConfig(
                 system_instruction=SYSTEM_PROMPT,

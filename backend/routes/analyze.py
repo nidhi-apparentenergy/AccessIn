@@ -117,12 +117,13 @@ async def analyze_job_description(req: AnalyzeRequest):
         client = genai.Client(api_key=api_key)
 
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-2.5-flash",
             contents=f"Analyze this job description:\n\n{req.job_description}",
             config=genai.types.GenerateContentConfig(
                 system_instruction=SYSTEM_PROMPT,
                 temperature=0.3,
-                max_output_tokens=2048,
+                max_output_tokens=8192,
+                response_mime_type="application/json",
             ),
         )
 

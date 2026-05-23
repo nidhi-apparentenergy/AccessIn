@@ -67,7 +67,7 @@ async def simplify_text(req: SimplifyRequest):
             prompt += f"\n\nContext: {req.context}"
 
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-2.5-flash",
             contents=prompt,
             config=genai.types.GenerateContentConfig(
                 system_instruction=SYSTEM_PROMPT,
