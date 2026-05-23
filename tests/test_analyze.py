@@ -1,24 +1,17 @@
 """
-Test script for the /analyze endpoint.
+pytest test suite for the /analyze endpoint.
 
 Usage:
   1. Start the server:  cd backend && uvicorn main:app --port 8000
-  2. Run this script:   python tests/test_analyze.py
+  2. Run tests:         pytest tests/test_analyze.py -v
 
-Or test manually with curl:
-  curl -X POST http://localhost:8000/analyze \
-    -H "Content-Type: application/json" \
-    -d @tests/sample_jd.json
+Requires httpx (already in requirements.txt).
 """
 
-import json
-import sys
-import urllib.request
-import urllib.error
+import pytest
+import httpx
 
-API_URL = "http://localhost:8000/analyze"
-
-# ── Realistic placeholder LinkedIn job description ───────────────────────────
+BASE_URL = "http://localhost:8000"
 
 SAMPLE_JD = """
 Software Engineer II - Backend Systems
@@ -70,79 +63,116 @@ to us — we want people who share our passion and energy!
 """
 
 
-def main():
-    print("=" * 60)
-    print("  LinkedIn Access+ — Analyze Endpoint Test")
-    print("=" * 60)
+# ── Fixtures ──────────────────────────────────────────────────────────────────
 
-    # First, check if server is running
-    try:
-        health_req = urllib.request.Request("http://localhost:8000/")
-        with urllib.request.urlopen(health_req, timeout=5) as resp:
-            health = json.loads(resp.read())
-            print(f"\n✅ Server is running: {health}")
-    except Exception as e:
-        print(f"\n❌ Server not reachable: {e}")
-        print("   Start it with: cd backend && uvicorn main:app --port 8000")
-        sys.exit(1)
-
-    # Send analyze request
-    print(f"\n📄 Sending job description ({len(SAMPLE_JD)} chars)...")
-    print("-" * 60)
-
-    payload = json.dumps({"job_description": SAMPLE_JD}).encode("utf-8")
-    req = urllib.request.Request(
-        API_URL,
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            result = json.loads(resp.read())
-    except urllib.error.HTTPError as e:
-        body = e.read().decode()
-        print(f"\n❌ HTTP {e.code}: {body}")
-        sys.exit(1)
-    except Exception as e:
-        print(f"\n❌ Request failed: {e}")
-        sys.exit(1)
-
-    # Pretty-print results
-    print(f"\n🏢 {result.get('title', '?')} @ {result.get('company', '?')}")
-    print(f"\n📊 Sensory Load Score: {result.get('sensory_load_score', '?')}/10")
-    print(f"   {result.get('sensory_load_explanation', '')}")
-
-    flags = result.get("bias_flags", [])
-    print(f"\n⚠️  Bias Flags ({len(flags)} found):")
-    for f in flags:
-        print(f"   • \"{f['phrase']}\"")
-        print(f"     Issue: {f['issue']}")
-        print(f"     Better: {f['suggestion']}")
-
-    print(f"\n📝 Simplified Summary:")
-    print(f"   {result.get('simplified_summary', '?')}")
-
-    highlights = result.get("key_highlights", [])
-    print(f"\n⭐ Key Highlights:")
-    for h in highlights:
-        print(f"   • {h}")
-
-    skills = result.get("key_skills", [])
-    print(f"\n🛠️  Key Skills: {', '.join(skills)}")
-    print(f"📈 Experience Level: {result.get('experience_level', '?')}")
-
-    tips = result.get("match_tips", [])
-    print(f"\n💡 Match Tips:")
-    for t in tips:
-        print(f"   • {t}")
-
-    print("\n" + "=" * 60)
-    print("  Full JSON Response:")
-    print("=" * 60)
-    print(json.dumps(result, indent=2))
+@pytest.fixture(scope="module")
+def client():
+    """Shared httpx client for the test module."""
+    with httpx.Client(base_url=BASE_URL, timeout=30) as c:
+        yield c
 
 
-if __name__ == "__main__":
-    main()
+@pytest.fixture(scope="module")
+def analysis(client):
+    """Run the /analyze endpoint once and share the result across tests."""
+    resp = client.post("/analyze", json={"job_description": SAMPLE_JD})
+    assert resp.status_code == 200, f"Unexpected status {resp.status_code}: {resp.text}"
+    return resp.json()
+
+
+# ── Health check ──────────────────────────────────────────────────────────────
+
+def test_health(client):
+    resp = client.get("/")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body.get("status") == "ok"
+
+
+# ── Input validation ──────────────────────────────────────────────────────────
+
+def test_empty_job_description_returns_422(client):
+    resp = client.post("/analyze", json={"job_description": "   "})
+    assert resp.status_code == 422
+
+
+def test_missing_field_returns_422(client):
+    resp = client.post("/analyze", json={})
+    assert resp.status_code == 422
+
+
+def test_oversized_job_description_returns_422(client):
+    huge = "x" * 21_000
+    resp = client.post("/analyze", json={"job_description": huge})
+    assert resp.status_code == 422
+
+
+# ── Response shape ────────────────────────────────────────────────────────────
+
+def test_response_has_required_top_level_keys(analysis):
+    required = {
+        "title", "company", "sensory_load_score", "sensory_load_explanation",
+        "bias_flags", "simplified_summary", "key_highlights",
+        "key_skills", "experience_level", "match_tips",
+    }
+    assert required.issubset(analysis.keys())
+
+
+def test_title_and_company_are_strings(analysis):
+    assert isinstance(analysis["title"], str) and analysis["title"]
+    assert isinstance(analysis["company"], str) and analysis["company"]
+
+
+def test_sensory_load_score_in_range(analysis):
+    score = analysis["sensory_load_score"]
+    assert isinstance(score, int), "sensory_load_score must be an integer"
+    assert 1 <= score <= 10, f"sensory_load_score {score} out of range 1-10"
+
+
+def test_sensory_load_explanation_is_non_empty_string(analysis):
+    assert isinstance(analysis["sensory_load_explanation"], str)
+    assert len(analysis["sensory_load_explanation"]) > 0
+
+
+def test_bias_flags_is_list(analysis):
+    assert isinstance(analysis["bias_flags"], list)
+
+
+def test_bias_flag_items_have_required_keys(analysis):
+    for flag in analysis["bias_flags"]:
+        assert "phrase" in flag, "bias flag missing 'phrase'"
+        assert "issue" in flag, "bias flag missing 'issue'"
+        assert "suggestion" in flag, "bias flag missing 'suggestion'"
+
+
+def test_simplified_summary_is_non_empty(analysis):
+    assert isinstance(analysis["simplified_summary"], str)
+    assert len(analysis["simplified_summary"]) > 0
+
+
+def test_key_highlights_is_non_empty_list(analysis):
+    assert isinstance(analysis["key_highlights"], list)
+    assert len(analysis["key_highlights"]) > 0
+
+
+def test_key_skills_is_non_empty_list(analysis):
+    assert isinstance(analysis["key_skills"], list)
+    assert len(analysis["key_skills"]) > 0
+
+
+def test_experience_level_is_valid(analysis):
+    assert analysis["experience_level"] in ("entry", "mid", "senior"), \
+        f"Unexpected experience_level: {analysis['experience_level']}"
+
+
+def test_match_tips_is_non_empty_list(analysis):
+    assert isinstance(analysis["match_tips"], list)
+    assert len(analysis["match_tips"]) > 0
+
+
+# ── Bias detection sanity check ───────────────────────────────────────────────
+
+def test_bias_flags_detected_for_known_problematic_jd(analysis):
+    """The sample JD contains several known bias phrases — at least one should be flagged."""
+    assert len(analysis["bias_flags"]) > 0, \
+        "Expected at least one bias flag for a JD with 'fast-paced', 'culture fit', etc."

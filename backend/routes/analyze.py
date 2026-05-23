@@ -9,20 +9,33 @@ Accepts a raw LinkedIn job description and uses Gemini to:
   5. Extract key skills, experience level, and match tips
 """
 
+import asyncio
 import json
 import os
-import time
+import re
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from google import genai
 
 router = APIRouter()
+
+MAX_JD_CHARS = 20_000  # guard against absurdly large payloads
 
 # ── Request / Response Models ────────────────────────────────────────────────
 
 class AnalyzeRequest(BaseModel):
     job_description: str
+
+    @field_validator("job_description")
+    @classmethod
+    def not_empty_and_not_too_long(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("job_description cannot be empty")
+        if len(v) > MAX_JD_CHARS:
+            raise ValueError(f"job_description exceeds {MAX_JD_CHARS} character limit")
+        return v
 
 
 class BiasFlag(BaseModel):
@@ -101,32 +114,38 @@ IMPORTANT: Return ONLY valid JSON. No markdown. No explanation outside the JSON.
 """
 
 
+def _strip_code_fences(text: str) -> str:
+    """Remove markdown code fences (with optional language tag) from a string."""
+    text = re.sub(r"^```[a-zA-Z]*\n?", "", text.strip())
+    text = re.sub(r"\n?```$", "", text.strip())
+    return text.strip()
+
+
 # ── Endpoint ─────────────────────────────────────────────────────────────────
+
+# Try gemini-2.5-flash first (best quality + JSON mode), fall back if unavailable.
+MODELS_TO_TRY = [
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+]
+
 
 @router.post("/analyze", response_model=AnalyzeResponse)
 async def analyze_job_description(req: AnalyzeRequest):
     """Analyze a LinkedIn job description for accessibility."""
 
-    if not req.job_description.strip():
-        raise HTTPException(status_code=400, detail="job_description cannot be empty")
-
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY not configured")
 
-    # Try gemini-2.5-flash first (best quality), fall back to lighter models
-    # if the primary is overloaded or unavailable.
-    MODELS_TO_TRY = [
-        "gemini-2.5-flash",
-        "gemini-2.0-flash",
-        "gemini-2.0-flash-lite",
-    ]
+    raw_text: str | None = None
 
     try:
         client = genai.Client(api_key=api_key)
 
         response = None
-        last_error = None
+        last_error: Exception | None = None
         for model_name in MODELS_TO_TRY:
             try:
                 response = client.models.generate_content(
@@ -143,29 +162,23 @@ async def analyze_job_description(req: AnalyzeRequest):
             except Exception as model_err:
                 last_error = model_err
                 err_str = str(model_err).lower()
-                if "503" in err_str or "unavailable" in err_str or "overloaded" in err_str or "quota" in err_str:
-                    time.sleep(1)
-                    continue  # try next model
+                if any(k in err_str for k in ("503", "unavailable", "overloaded", "quota")):
+                    await asyncio.sleep(1)  # non-blocking sleep
+                    continue
                 raise  # other errors re-raised immediately
 
         if response is None:
-            raise last_error
+            raise last_error  # type: ignore[misc]
 
-        raw_text = response.text.strip()
-
-        # Strip markdown code fences if Gemini wraps the JSON
-        if raw_text.startswith("```"):
-            raw_text = raw_text.split("\n", 1)[1]  # remove first ``` line
-            raw_text = raw_text.rsplit("```", 1)[0]  # remove last ```
-            raw_text = raw_text.strip()
-
+        raw_text = _strip_code_fences(response.text)
         result = json.loads(raw_text)
         return AnalyzeResponse(**result)
 
     except json.JSONDecodeError as e:
+        preview = (raw_text or "")[:500]
         raise HTTPException(
             status_code=502,
-            detail=f"Gemini returned invalid JSON: {e}. Raw: {raw_text[:500]}",
+            detail=f"Gemini returned invalid JSON: {e}. Raw: {preview}",
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Analysis failed: {e}")

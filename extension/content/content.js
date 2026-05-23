@@ -1,4 +1,18 @@
 // ==========================================
+// UTILITIES
+// ==========================================
+
+/**
+ * Safely escape a string for insertion into HTML.
+ * Prevents XSS when injecting user-supplied or AI-generated text into innerHTML.
+ */
+function escapeHTML(str) {
+    const div = document.createElement('div');
+    div.appendChild(document.createTextNode(String(str)));
+    return div.innerHTML;
+}
+
+// ==========================================
 // FEATURE 1: INTENT LOCK & BANNER LOGIC
 // ==========================================
 
@@ -14,19 +28,28 @@ function injectBanner(intent) {
     display: flex; align-items: center; justify-content: space-between;
     font-family: -apple-system, sans-serif; font-size: 14px;
   `;
-    banner.innerHTML = `
-    <span>🎯 Focus: <strong>${intent}</strong></span>
-    <span id="accessplus-done" style="cursor:pointer; background:white; color:#0a66c2;
-      padding:4px 12px; border-radius:20px; font-size:12px; font-weight:600;">
-      Done ✓
-    </span>
-  `;
+
+    // Build banner content safely — no innerHTML with user data
+    const focusSpan = document.createElement('span');
+    const strong = document.createElement('strong');
+    strong.textContent = intent;          // textContent — safe
+    focusSpan.appendChild(document.createTextNode('🎯 Focus: '));
+    focusSpan.appendChild(strong);
+
+    const doneBtn = document.createElement('span');
+    doneBtn.id = 'accessplus-done';
+    doneBtn.textContent = 'Done ✓';
+    doneBtn.style.cssText = 'cursor:pointer; background:white; color:#0a66c2; padding:4px 12px; border-radius:20px; font-size:12px; font-weight:600;';
+
+    banner.appendChild(focusSpan);
+    banner.appendChild(doneBtn);
+
     document.body.prepend(banner);
     document.body.style.marginTop = '44px';
 
     hideFeed();
 
-    document.getElementById('accessplus-done').addEventListener('click', () => {
+    doneBtn.addEventListener('click', () => {
         chrome.storage.local.set({ lockActive: false });
         removeBanner();
     });
@@ -57,20 +80,30 @@ function removeBanner() {
 
 let isReading = false;
 let currentSpeed = 0.9;
-let currentItemIndex = -1; 
-let textBlocks = []; 
+let currentItemIndex = -1;
+let textBlocks = [];
+
+// Cache management — only re-query the DOM when the page changes
+let textBlocksStale = true;
+const domObserver = new MutationObserver(() => { textBlocksStale = true; });
+domObserver.observe(document.body, { childList: true, subtree: true });
 
 function refreshTextBlocks() {
+    if (!textBlocksStale) return;   // use cached list if DOM hasn't changed
+
+    // Clear outlines on old blocks before rebuilding the list
+    textBlocks.forEach(el => { if (el) el.style.outline = 'none'; });
+
     const allElements = document.querySelectorAll('p, span[dir="ltr"], h1, h2, h3');
-    
+
     textBlocks = Array.from(allElements).filter(el => {
         const text = el.innerText ? el.innerText.trim() : "";
 
-        // Must have meaningful content — skip short labels, numbers, badges
         if (text.length < 2) return false;
 
-        // Skip our own injected captions
+        // Skip our own injected captions / panels
         if (el.classList.contains('accessin-caption')) return false;
+        if (el.closest('#accessin-analysis-panel, #accessplus-banner, #accessplus-tts-btn')) return false;
 
         // Skip UI chrome
         if (el.closest('button, nav, header, footer, [role="button"], [role="navigation"], .global-nav, .search-global-typeahead')) {
@@ -80,28 +113,27 @@ function refreshTextBlocks() {
         // Skip notification badges, counters, reaction counts
         if (/^\d+$/.test(text)) return false;
 
-        // Skip elements that are inside image containers
+        // Skip elements inside image containers
         if (el.closest('figure, [data-view-name*="image"], .feed-shared-image, .update-components-image')) {
             return false;
         }
 
         return true;
     });
+
+    textBlocksStale = false;
 }
 
-// --- THE NEW GEOMETRY ENGINE ---
-// Calculates distances to find the nearest element in a specific direction
+// --- THE GEOMETRY ENGINE ---
 function findNearestItem(direction) {
     refreshTextBlocks();
     if (textBlocks.length === 0) return -1;
-    
-    // If nothing is selected yet, just grab the first item on the screen
-    if (currentItemIndex < 0 || currentItemIndex >= textBlocks.length) return 0; 
+
+    if (currentItemIndex < 0 || currentItemIndex >= textBlocks.length) return 0;
 
     const currentEl = textBlocks[currentItemIndex];
     const currentRect = currentEl.getBoundingClientRect();
-    
-    // Get the exact center X and Y coordinates of our current box
+
     const cx = currentRect.left + currentRect.width / 2;
     const cy = currentRect.top + currentRect.height / 2;
 
@@ -109,26 +141,21 @@ function findNearestItem(direction) {
     let minDistance = Infinity;
 
     textBlocks.forEach((el, index) => {
-        if (index === currentItemIndex) return; // Skip ourselves
+        if (index === currentItemIndex) return;
 
         const rect = el.getBoundingClientRect();
-        if (rect.width === 0 || rect.height === 0) return; // Skip invisible things
+        if (rect.width === 0 || rect.height === 0) return;
 
         const ex = rect.left + rect.width / 2;
         const ey = rect.top + rect.height / 2;
 
         let isValidDirection = false;
-        
-        // Check if the target is genuinely in the direction we want to go
-        // We add a tiny 10px buffer to handle slightly misaligned grid items
-        if (direction === 'up' && ey < cy - 10) isValidDirection = true;
-        if (direction === 'down' && ey > cy + 10) isValidDirection = true;
-        if (direction === 'left' && ex < cx - 10) isValidDirection = true;
+        if (direction === 'up'    && ey < cy - 10) isValidDirection = true;
+        if (direction === 'down'  && ey > cy + 10) isValidDirection = true;
+        if (direction === 'left'  && ex < cx - 10) isValidDirection = true;
         if (direction === 'right' && ex > cx + 10) isValidDirection = true;
 
         if (isValidDirection) {
-            // Weight vertical distance less than horizontal so navigation
-            // stays in the reading flow (top-to-bottom) rather than jumping sideways
             const dx = ex - cx;
             const dy = ey - cy;
             const distance = Math.sqrt(Math.pow(dx * 0.5, 2) + Math.pow(dy, 2));
@@ -146,28 +173,25 @@ function readItemAt(index) {
     refreshTextBlocks();
 
     if (textBlocks.length === 0) {
-        let highlightedText = window.getSelection().toString().trim();
-        if (highlightedText) {
-            speakText(highlightedText);
-        } else {
-            speakText("No readable text found.");
-        }
+        const highlighted = window.getSelection().toString().trim();
+        speakText(highlighted || "No readable text found.");
         return;
     }
 
     if (index < 0 || index >= textBlocks.length) return;
 
     window.speechSynthesis.cancel();
-    currentItemIndex = index;
 
-    textBlocks.forEach(item => {
-        if(item) item.style.outline = 'none'; 
-    });
-    
+    // Clear previous outline
+    if (currentItemIndex >= 0 && textBlocks[currentItemIndex]) {
+        textBlocks[currentItemIndex].style.outline = 'none';
+    }
+
+    currentItemIndex = index;
     const activeItem = textBlocks[currentItemIndex];
     if (activeItem) {
         activeItem.style.outline = '4px solid #0a66c2';
-        activeItem.style.outlineOffset = '4px'; 
+        activeItem.style.outlineOffset = '4px';
         activeItem.style.borderRadius = '4px';
         activeItem.scrollIntoView({ behavior: 'smooth', block: 'center' });
         speakText(activeItem.innerText);
@@ -175,19 +199,22 @@ function readItemAt(index) {
 }
 
 function speakText(text) {
-    let cleanText = text.replace(/Like|Comment|Share|Send|Reply/g, '').trim();
-    
-    // If nothing meaningful to read, don't speak (avoids silent jumps)
+    // Only strip UI action words when they appear as standalone tokens,
+    // not when they're part of real sentences.
+    const cleanText = text
+        .replace(/\b(Like|Comment|Share|Send|Reply)\b(?=\s*$|\s*\n)/gm, '')
+        .trim();
+
     if (!cleanText || cleanText.length < 2) return;
 
     const utterance = new SpeechSynthesisUtterance(cleanText);
     utterance.rate = currentSpeed;
-    
-    utterance.onend = () => { 
-        isReading = false; 
+
+    utterance.onend = () => {
+        isReading = false;
         updateButtonUI("🔊 Read Aloud\n(Alt+Arrows)");
     };
-    
+
     window.speechSynthesis.speak(utterance);
     isReading = true;
     updateButtonUI("⏹️ Stop\n(Alt+S)");
@@ -225,10 +252,10 @@ function injectTTSButton() {
             isReading = false;
             updateButtonUI("🔊 Read Aloud\n(Alt+Arrows)");
             if (currentItemIndex >= 0 && textBlocks[currentItemIndex]) {
-                textBlocks[currentItemIndex].style.outline = 'none'; 
+                textBlocks[currentItemIndex].style.outline = 'none';
             }
         } else {
-            readItemAt(0); 
+            readItemAt(0);
         }
     });
 }
@@ -239,12 +266,11 @@ function updateButtonUI(text) {
 }
 
 // ==========================================
-// THE NEW SPATIAL KEYBOARD LISTENER
+// THE SPATIAL KEYBOARD LISTENER
 // ==========================================
 document.addEventListener('keydown', (e) => {
-    if (!e.altKey) return; 
+    if (!e.altKey) return;
 
-    // ---- SPATIAL NAVIGATION (The Magic) ----
     if (e.code === 'ArrowUp') {
         e.preventDefault();
         const nextIdx = findNearestItem('up');
@@ -253,7 +279,6 @@ document.addEventListener('keydown', (e) => {
 
     if (e.code === 'ArrowDown') {
         e.preventDefault();
-        // If we haven't started reading yet, down arrow starts at index 0
         if (currentItemIndex === -1) {
             readItemAt(0);
         } else {
@@ -273,42 +298,343 @@ document.addEventListener('keydown', (e) => {
         const nextIdx = findNearestItem('right');
         if (nextIdx !== -1) readItemAt(nextIdx);
     }
-    
-    // ---- CORE CONTROLS ----
+
     if (e.code === 'KeyS') {
         e.preventDefault();
         window.speechSynthesis.cancel();
         isReading = false;
         updateButtonUI("🔊 Read Aloud\n(Alt+Arrows)");
         if (currentItemIndex >= 0 && textBlocks[currentItemIndex]) {
-            textBlocks[currentItemIndex].style.outline = 'none'; 
+            textBlocks[currentItemIndex].style.outline = 'none';
         }
     }
 
-    // ---- NEW SPEED CONTROLS (+ and -) ----
     if (e.code === 'Equal' || e.key === '+') {
         e.preventDefault();
-        currentSpeed = Math.min(2.0, currentSpeed + 0.1);
+        currentSpeed = Math.min(2.0, parseFloat((currentSpeed + 0.1).toFixed(1)));
         announceSpeed();
     }
 
     if (e.code === 'Minus' || e.key === '-') {
         e.preventDefault();
-        currentSpeed = Math.max(0.5, currentSpeed - 0.1);
+        currentSpeed = Math.max(0.5, parseFloat((currentSpeed - 0.1).toFixed(1)));
         announceSpeed();
     }
 });
 
-window.addEventListener('beforeunload', () => window.speechSynthesis.cancel());
+window.addEventListener('beforeunload', () => {
+    window.speechSynthesis.cancel();
+    domObserver.disconnect();
+    msgObserver.disconnect();
+});
+
+// ==========================================
+// FEATURE 4: VISUAL NOTIFICATION ALERTS
+// Flash/pulse the page for new LinkedIn messages
+// so deaf / hard-of-hearing users aren't reliant
+// on sound to notice incoming messages.
+// ==========================================
+
+// ── Inject keyframe styles once ───────────────────────────────────────────────
+(function injectVisualAlertStyles() {
+    if (document.getElementById('accessin-alert-styles')) return;
+    const style = document.createElement('style');
+    style.id = 'accessin-alert-styles';
+    style.textContent = `
+        /* Full-viewport flash overlay */
+        @keyframes accessin-flash {
+            0%   { opacity: 0.55; }
+            40%  { opacity: 0.55; }
+            100% { opacity: 0;    }
+        }
+        #accessin-flash-overlay {
+            pointer-events: none;
+            position: fixed;
+            inset: 0;
+            z-index: 2147483646;
+            opacity: 0;
+            animation: accessin-flash 700ms ease-out forwards;
+        }
+
+        /* Reduced-motion: swap flash for a border pulse instead */
+        @media (prefers-reduced-motion: reduce) {
+            @keyframes accessin-border-pulse {
+                0%, 100% { box-shadow: inset 0 0 0 0px var(--ain-alert-color, #0a66c2); }
+                50%       { box-shadow: inset 0 0 0 6px var(--ain-alert-color, #0a66c2); }
+            }
+            #accessin-flash-overlay {
+                animation: accessin-border-pulse 900ms ease-in-out 2 forwards;
+                background: transparent !important;
+            }
+        }
+
+        /* Toast notification badge */
+        @keyframes accessin-toast-in {
+            from { transform: translateY(16px); opacity: 0; }
+            to   { transform: translateY(0);    opacity: 1; }
+        }
+        @keyframes accessin-toast-out {
+            from { transform: translateY(0);    opacity: 1; }
+            to   { transform: translateY(16px); opacity: 0; }
+        }
+        .accessin-toast {
+            position: fixed;
+            bottom: 80px;          /* sit above the TTS button */
+            right: 20px;
+            z-index: 2147483647;
+            max-width: 280px;
+            background: #1a1a1a;
+            color: #fff;
+            border-radius: 10px;
+            padding: 10px 14px;
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            font-size: 13px;
+            line-height: 1.4;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.35);
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            animation: accessin-toast-in 250ms ease-out forwards;
+            cursor: pointer;
+        }
+        .accessin-toast.removing {
+            animation: accessin-toast-out 250ms ease-in forwards;
+        }
+        .accessin-toast-icon {
+            font-size: 18px;
+            flex-shrink: 0;
+            margin-top: 1px;
+        }
+        .accessin-toast-body { display: flex; flex-direction: column; gap: 2px; }
+        .accessin-toast-title { font-weight: 700; font-size: 12px; color: #aaa; }
+        .accessin-toast-sender { font-weight: 700; font-size: 13px; }
+        .accessin-toast-preview { font-size: 12px; color: #ccc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
+        .accessin-toast-dismiss {
+            margin-left: auto;
+            flex-shrink: 0;
+            background: rgba(255,255,255,0.15);
+            border: none;
+            color: white;
+            border-radius: 50%;
+            width: 18px; height: 18px;
+            font-size: 11px;
+            cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+        }
+    `;
+    document.head.appendChild(style);
+})();
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let visualAlertsEnabled = true;   // default on; synced from storage
+let alertColor = '#0a66c2';       // default LinkedIn blue; user-configurable
+let toastQueue = [];              // active toast elements
+const MAX_TOASTS = 3;
+
+// Load persisted prefs
+chrome.storage.local.get(['visualAlertsEnabled', 'alertColor'], (prefs) => {
+    if (typeof prefs.visualAlertsEnabled === 'boolean') {
+        visualAlertsEnabled = prefs.visualAlertsEnabled;
+    }
+    if (prefs.alertColor) alertColor = prefs.alertColor;
+});
+
+// Keep prefs in sync if the user changes them while the tab is open
+chrome.storage.onChanged.addListener((changes) => {
+    if (changes.visualAlertsEnabled) {
+        visualAlertsEnabled = changes.visualAlertsEnabled.newValue;
+    }
+    if (changes.alertColor) {
+        alertColor = changes.alertColor.newValue;
+    }
+});
+
+// ── Flash overlay ─────────────────────────────────────────────────────────────
+function triggerFlash() {
+    // Remove any existing overlay first so re-triggering restarts the animation
+    const old = document.getElementById('accessin-flash-overlay');
+    if (old) old.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'accessin-flash-overlay';
+    overlay.style.background = alertColor;
+    overlay.style.setProperty('--ain-alert-color', alertColor);
+    document.body.appendChild(overlay);
+
+    // Clean up after animation completes (700ms flash + small buffer)
+    overlay.addEventListener('animationend', () => overlay.remove(), { once: true });
+}
+
+// ── Toast notification ────────────────────────────────────────────────────────
+function showToast(sender, preview) {
+    // Cap the queue — remove oldest if full
+    if (toastQueue.length >= MAX_TOASTS) {
+        dismissToast(toastQueue[0]);
+    }
+
+    const toast = document.createElement('div');
+    toast.className = 'accessin-toast';
+    toast.setAttribute('role', 'alert');
+    toast.setAttribute('aria-live', 'assertive');
+
+    // Offset stacked toasts upward
+    const stackOffset = toastQueue.length * 76;
+    toast.style.bottom = `${80 + stackOffset}px`;
+
+    const icon = document.createElement('span');
+    icon.className = 'accessin-toast-icon';
+    icon.textContent = '💬';
+
+    const body = document.createElement('div');
+    body.className = 'accessin-toast-body';
+
+    const title = document.createElement('span');
+    title.className = 'accessin-toast-title';
+    title.textContent = 'New Message';
+
+    const senderEl = document.createElement('span');
+    senderEl.className = 'accessin-toast-sender';
+    senderEl.textContent = sender;   // already plain text from DOM — safe
+
+    const previewEl = document.createElement('span');
+    previewEl.className = 'accessin-toast-preview';
+    previewEl.textContent = preview;
+
+    body.appendChild(title);
+    body.appendChild(senderEl);
+    if (preview) body.appendChild(previewEl);
+
+    const dismissBtn = document.createElement('button');
+    dismissBtn.className = 'accessin-toast-dismiss';
+    dismissBtn.textContent = '✕';
+    dismissBtn.setAttribute('aria-label', 'Dismiss notification');
+    dismissBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        dismissToast(toast);
+    });
+
+    toast.appendChild(icon);
+    toast.appendChild(body);
+    toast.appendChild(dismissBtn);
+
+    // Clicking the toast navigates to the messaging panel
+    toast.addEventListener('click', () => {
+        const msgLink = document.querySelector('a[href*="/messaging/"]');
+        if (msgLink) msgLink.click();
+        dismissToast(toast);
+    });
+
+    document.body.appendChild(toast);
+    toastQueue.push(toast);
+
+    // Auto-dismiss after 6 seconds
+    setTimeout(() => dismissToast(toast), 6000);
+}
+
+function dismissToast(toast) {
+    if (!toast || !toast.isConnected) return;
+    toast.classList.add('removing');
+    toast.addEventListener('animationend', () => {
+        toast.remove();
+        toastQueue = toastQueue.filter(t => t !== toast);
+        // Re-stack remaining toasts
+        toastQueue.forEach((t, i) => { t.style.bottom = `${80 + i * 76}px`; });
+    }, { once: true });
+}
+
+// ── LinkedIn message DOM watcher ──────────────────────────────────────────────
+
+/**
+ * LinkedIn renders new messages as list items inside the conversation thread.
+ * We watch the messaging overlay container for added nodes and check whether
+ * the newest message was sent by someone else (not the current user).
+ *
+ * Selectors used (as of 2025 — LinkedIn changes these periodically):
+ *   Conversation list item : .msg-conversation-listitem, [data-view-name*="conversation"]
+ *   Message bubble         : .msg-s-message-list__event, .msg-s-event-listitem
+ *   Sender name            : .msg-s-message-group__name, .msg-s-event-listitem__link
+ *   Message text           : .msg-s-event-listitem__body, .msg-s-message-list__event p
+ *   "You" indicator        : .msg-s-message-group--outgoing, [data-view-name*="outgoing"]
+ */
+
+// Tracks the last seen message element to avoid double-firing
+let lastSeenMsgId = null;
+
+function handleNewMessageNode(node) {
+    if (!visualAlertsEnabled) return;
+    if (!(node instanceof HTMLElement)) return;
+
+    // We only care about incoming message events
+    const isOutgoing =
+        node.classList.contains('msg-s-message-group--outgoing') ||
+        node.closest('.msg-s-message-group--outgoing') ||
+        node.getAttribute('data-view-name')?.includes('outgoing');
+
+    if (isOutgoing) return;
+
+    // Extract sender name — try several selectors
+    const senderEl =
+        node.querySelector('.msg-s-message-group__name') ||
+        node.querySelector('.msg-s-event-listitem__link') ||
+        node.closest('.msg-s-message-group')?.querySelector('.msg-s-message-group__name');
+
+    const sender = senderEl?.innerText?.trim() || 'Someone';
+
+    // Extract message preview text
+    const bodyEl =
+        node.querySelector('.msg-s-event-listitem__body') ||
+        node.querySelector('.msg-s-message-list__event p') ||
+        node.querySelector('p');
+
+    const preview = bodyEl?.innerText?.trim().slice(0, 80) || '';
+
+    // Deduplicate — LinkedIn sometimes re-renders the same node
+    const msgId = sender + ':' + preview;
+    if (msgId === lastSeenMsgId) return;
+    lastSeenMsgId = msgId;
+
+    triggerFlash();
+    showToast(sender, preview);
+}
+
+// Observe the full document for messaging panel mutations.
+// LinkedIn is a SPA — the messaging panel mounts/unmounts dynamically,
+// so we watch document.body rather than a specific container.
+const msgObserver = new MutationObserver((mutations) => {
+    if (!visualAlertsEnabled) return;
+    for (const mutation of mutations) {
+        for (const node of mutation.addedNodes) {
+            // Direct match
+            if (
+                node instanceof HTMLElement && (
+                    node.classList.contains('msg-s-event-listitem') ||
+                    node.classList.contains('msg-s-message-list__event') ||
+                    node.getAttribute?.('data-view-name')?.includes('message-list-item')
+                )
+            ) {
+                handleNewMessageNode(node);
+                continue;
+            }
+
+            // Descendant match — new message may be nested inside a wrapper
+            if (node instanceof HTMLElement) {
+                const inner =
+                    node.querySelector('.msg-s-event-listitem') ||
+                    node.querySelector('.msg-s-message-list__event') ||
+                    node.querySelector('[data-view-name*="message-list-item"]');
+                if (inner) handleNewMessageNode(inner);
+            }
+        }
+    }
+});
+
+msgObserver.observe(document.body, { childList: true, subtree: true });
 
 // ==========================================
 // FEATURE 3: JOB ANALYZER
-// Extracts job description from LinkedIn job
-// pages and injects simplified results inline.
 // ==========================================
 
 function extractJobDescription() {
-    // Strategy 1: known stable class names (may work on /jobs/view/ pages)
     const stableSelectors = [
         '.jobs-description__content',
         '.jobs-description-content__text',
@@ -321,12 +647,10 @@ function extractJobDescription() {
         if (el && el.innerText.trim().length > 100) return el.innerText.trim();
     }
 
-    // Strategy 2: find "About the job" heading and collect all text after it
     const allElements = Array.from(document.querySelectorAll('h1, h2, h3, h4'));
     for (const heading of allElements) {
         const text = heading.innerText.trim().toLowerCase();
         if (text === 'about the job' || text === 'job description') {
-            // Walk up to find a container with meaningful text
             let container = heading.parentElement;
             for (let i = 0; i < 4; i++) {
                 if (container && container.innerText.trim().length > 150) {
@@ -337,8 +661,6 @@ function extractJobDescription() {
         }
     }
 
-    // Strategy 3: grab the entire right-side job detail panel
-    // On search results pages, the job detail is in the right column
     const rightPanel = document.querySelector(
         '.jobs-search__job-details, .job-details, [class*="job-details"], .scaffold-layout__detail'
     );
@@ -346,10 +668,8 @@ function extractJobDescription() {
         return rightPanel.innerText.trim();
     }
 
-    // Strategy 4: last resort — find any div/section with 200+ chars that contains job keywords
     const candidates = Array.from(document.querySelectorAll('div, section, article'));
     for (const el of candidates) {
-        // Only direct text, not deeply nested containers
         if (el.children.length > 20) continue;
         const t = el.innerText.trim();
         if (t.length > 200 && t.length < 8000 &&
@@ -372,32 +692,62 @@ function removeAnalysisPanel() {
 function injectAnalysisPanel(data) {
     removeAnalysisPanel();
 
+    const anchorSelectors = [
+        '.jobs-description__content',
+        '.jobs-description-content__text',
+        '.jobs-box__html-content',
+        '[class*="jobs-description"]',
+        '.description__text',
+    ];
+    let anchor = null;
+    for (const sel of anchorSelectors) {
+        anchor = document.querySelector(sel);
+        if (anchor) break;
+    }
+
+    if (!anchor) {
+        const headings = Array.from(document.querySelectorAll('h2, h3'));
+        for (const h of headings) {
+            if (h.innerText.trim().toLowerCase() === 'about the job') {
+                anchor = h.closest('section') || h.parentElement;
+                break;
+            }
+        }
+    }
+
+    if (!anchor) return;
+
     const scoreColor = data.sensory_load_score <= 3 ? '#27ae60'
         : data.sensory_load_score <= 6 ? '#e67e22' : '#c0392b';
 
-    const biasHTML = data.bias_flags && data.bias_flags.length > 0
-        ? `<div class="ain-section">
+    // ── Build bias flags HTML safely ──────────────────────────────────────────
+    let biasHTML = '';
+    if (data.bias_flags && data.bias_flags.length > 0) {
+        const flagsInner = data.bias_flags.map(f => `
+            <div class="ain-bias-item">
+                <span class="ain-bias-phrase">"${escapeHTML(f.phrase)}"</span>
+                <span class="ain-bias-issue">${escapeHTML(f.issue)}</span>
+                <span class="ain-bias-fix">✅ ${escapeHTML(f.suggestion)}</span>
+            </div>`).join('');
+        biasHTML = `<div class="ain-section">
             <div class="ain-title">⚠️ Bias Flags</div>
-            ${data.bias_flags.map(f => `
-                <div class="ain-bias-item">
-                    <span class="ain-bias-phrase">"${f.phrase}"</span>
-                    <span class="ain-bias-issue">${f.issue}</span>
-                    <span class="ain-bias-fix">✅ ${f.suggestion}</span>
-                </div>`).join('')}
-           </div>`
-        : '';
+            ${flagsInner}
+        </div>`;
+    }
 
     const highlightsHTML = (data.key_highlights || [])
-        .map(h => `<li>${h}</li>`).join('');
+        .map(h => `<li>${escapeHTML(h)}</li>`).join('');
 
     const skillsHTML = (data.key_skills || [])
-        .map(s => `<span class="ain-tag">${s}</span>`).join('');
+        .map(s => `<span class="ain-tag">${escapeHTML(s)}</span>`).join('');
 
     const tipsHTML = (data.match_tips || [])
-        .map(t => `<li>${t}</li>`).join('');
+        .map(t => `<li>${escapeHTML(t)}</li>`).join('');
 
     const panel = document.createElement('div');
     panel.id = 'accessin-analysis-panel';
+
+    // Styles injected once via a <style> tag scoped to the panel id
     panel.innerHTML = `
         <style>
             #accessin-analysis-panel {
@@ -505,19 +855,19 @@ function injectAnalysisPanel(data) {
         </style>
         <div class="ain-header">
             <span class="ain-header-title">🧠 AccessIn — Job Analysis</span>
-            <button class="ain-close" id="ain-close-btn">✕</button>
+            <button class="ain-close" id="ain-close-btn" aria-label="Close analysis panel">✕</button>
         </div>
         <div class="ain-body">
             <div>
                 <div class="ain-score-row">
                     <span class="ain-score-label">Sensory Load</span>
-                    <span class="ain-score-badge">${data.sensory_load_score} / 10</span>
+                    <span class="ain-score-badge">${escapeHTML(String(data.sensory_load_score))} / 10</span>
                 </div>
-                <div class="ain-score-explain">${data.sensory_load_explanation}</div>
+                <div class="ain-score-explain">${escapeHTML(data.sensory_load_explanation)}</div>
             </div>
             <div class="ain-section">
                 <div class="ain-title">📋 Simplified Summary</div>
-                <div class="ain-summary">${data.simplified_summary}</div>
+                <div class="ain-summary">${escapeHTML(data.simplified_summary)}</div>
             </div>
             <div class="ain-section">
                 <div class="ain-title">⭐ Key Highlights</div>
@@ -562,6 +912,14 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     }
     if (msg.type === 'ACTIVATE_LOCK') injectBanner(msg.intent);
     if (msg.type === 'DEACTIVATE_LOCK') removeBanner();
+    if (msg.type === 'SET_VISUAL_ALERTS') {
+        visualAlertsEnabled = msg.enabled;
+        sendResponse({ ok: true });
+    }
+    if (msg.type === 'SET_ALERT_COLOR') {
+        alertColor = msg.color;
+        sendResponse({ ok: true });
+    }
 });
 
 // ==========================================
