@@ -1433,36 +1433,109 @@ window.setTimeout(() => {
 function extractProfileContent() {
     const profile = {};
 
-    // Name
+    // ── Name ─────────────────────────────────────────────────────────────────
+    // Try every known LinkedIn h1 pattern
     const nameEl =
         document.querySelector('h1.text-heading-xlarge') ||
         document.querySelector('h1[class*="heading"]') ||
-        document.querySelector('.pv-top-card--list h1');
+        document.querySelector('h1[class*="title"]') ||
+        document.querySelector('.pv-top-card--list h1') ||
+        document.querySelector('main h1');
     profile.name = nameEl?.innerText?.trim() || '';
 
-    // Headline
+    // ── Headline ──────────────────────────────────────────────────────────────
+    // The headline sits right below the name — grab the first non-empty div/span
+    // after the h1 that isn't a location or connection count
     const headlineEl =
         document.querySelector('.text-body-medium.break-words') ||
         document.querySelector('[data-generated-suggestion-target]') ||
-        document.querySelector('.pv-top-card-section__headline');
-    profile.headline = headlineEl?.innerText?.trim() || '';
+        document.querySelector('.pv-top-card-section__headline') ||
+        document.querySelector('[class*="top-card"] [class*="headline"]') ||
+        document.querySelector('[class*="profile-info"] [class*="subtitle"]');
 
-    // About section
-    const aboutSection =
-        document.querySelector('#about')?.closest('section') ||
-        document.querySelector('[data-view-name*="profile-card-about"]') ||
-        document.querySelector('.pv-about-section');
-    profile.about = aboutSection?.innerText?.replace(/^About\s*/i, '').trim() || '';
+    // Fallback: second meaningful text node after h1
+    if (!headlineEl && nameEl) {
+        let sibling = nameEl.nextElementSibling;
+        while (sibling) {
+            const t = sibling.innerText?.trim();
+            if (t && t.length > 5 && !/^\d+/.test(t)) {
+                profile.headline = t;
+                break;
+            }
+            sibling = sibling.nextElementSibling;
+        }
+    } else {
+        profile.headline = headlineEl?.innerText?.trim() || '';
+    }
 
-    // Experience — grab all experience section text
-    const expSection =
-        document.querySelector('#experience')?.closest('section') ||
-        document.querySelector('[data-view-name*="profile-card-experience"]');
-    profile.experience = expSection?.innerText?.replace(/^Experience\s*/i, '').trim().slice(0, 3000) || '';
+    // ── About ─────────────────────────────────────────────────────────────────
+    // Strategy 1: anchor by #about id
+    const aboutAnchor = document.getElementById('about');
+    if (aboutAnchor) {
+        const section = aboutAnchor.closest('section') || aboutAnchor.parentElement;
+        const text = section?.innerText?.replace(/^About\s*/i, '').trim();
+        if (text && text.length > 10) {
+            profile.about = text.slice(0, 3000);
+        }
+    }
 
-    // Profile URL
+    // Strategy 2: data-view-name
+    if (!profile.about) {
+        const aboutSection =
+            document.querySelector('[data-view-name*="profile-card-about"]') ||
+            document.querySelector('[data-view-name*="about"]');
+        const text = aboutSection?.innerText?.replace(/^About\s*/i, '').trim();
+        if (text && text.length > 10) profile.about = text.slice(0, 3000);
+    }
+
+    // Strategy 3: find any section whose heading says "About"
+    if (!profile.about) {
+        const headings = Array.from(document.querySelectorAll('h2, h3, span[class*="title"]'));
+        for (const h of headings) {
+            if (h.innerText?.trim().toLowerCase() === 'about') {
+                const section = h.closest('section') || h.parentElement?.parentElement;
+                const text = section?.innerText?.replace(/^About\s*/i, '').trim();
+                if (text && text.length > 10) {
+                    profile.about = text.slice(0, 3000);
+                    break;
+                }
+            }
+        }
+    }
+
+    // ── Experience ────────────────────────────────────────────────────────────
+    const expAnchor = document.getElementById('experience');
+    if (expAnchor) {
+        const section = expAnchor.closest('section') || expAnchor.parentElement;
+        const text = section?.innerText?.replace(/^Experience\s*/i, '').trim();
+        if (text && text.length > 10) profile.experience = text.slice(0, 3000);
+    }
+
+    if (!profile.experience) {
+        const expSection =
+            document.querySelector('[data-view-name*="profile-card-experience"]') ||
+            document.querySelector('[data-view-name*="experience"]');
+        const text = expSection?.innerText?.replace(/^Experience\s*/i, '').trim();
+        if (text && text.length > 10) profile.experience = text.slice(0, 3000);
+    }
+
+    // ── Last resort: grab the whole main profile card text ────────────────────
+    // If we still have nothing useful, pull from the main content area
+    if (!profile.headline && !profile.about) {
+        const mainContent =
+            document.querySelector('main') ||
+            document.querySelector('[class*="scaffold-layout__main"]') ||
+            document.querySelector('[class*="profile-view"]');
+        if (mainContent) {
+            const fullText = mainContent.innerText?.trim().slice(0, 5000) || '';
+            if (fullText.length > 50) {
+                // Use it as the "about" so we have something to score
+                profile.about = fullText;
+            }
+        }
+    }
+
     profile.profile_url = window.location.href;
-
     return profile;
 }
 

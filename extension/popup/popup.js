@@ -144,7 +144,7 @@ document.getElementById('profileScoreBtn').addEventListener('click', async () =>
             return;
         }
 
-        if (!profileData || !profileData.headline && !profileData.about) {
+        if (!profileData || (!profileData.headline && !profileData.about && !profileData.experience)) {
             setStatus('profileScoreStatus', 'No profile content found.', 'error');
             return;
         }

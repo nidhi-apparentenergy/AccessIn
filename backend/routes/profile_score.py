@@ -63,74 +63,63 @@ Given profile content, return a JSON object with EXACTLY these fields
 {
   "overall_score": <integer 0-100>,
   "grade": "<A | B | C | D | F>",
-  "summary": "<2-3 plain-English sentences about the profile's accessibility overall>",
+  "summary": "<2 short sentences max, plain English, under 30 words total>",
   "breakdown": [
     {
       "category": "Plain Language",
       "score": <0-10>,
-      "feedback": "<one sentence about this category>",
-      "tip": "<one actionable improvement>"
+      "feedback": "<max 12 words>",
+      "tip": "<max 12 words>"
     },
     {
       "category": "Clarity & Structure",
       "score": <0-10>,
-      "feedback": "<one sentence>",
-      "tip": "<one actionable improvement>"
+      "feedback": "<max 12 words>",
+      "tip": "<max 12 words>"
     },
     {
       "category": "Jargon & Buzzwords",
       "score": <0-10>,
-      "feedback": "<one sentence>",
-      "tip": "<one actionable improvement>"
+      "feedback": "<max 12 words>",
+      "tip": "<max 12 words>"
     },
     {
       "category": "Sentence Length",
       "score": <0-10>,
-      "feedback": "<one sentence>",
-      "tip": "<one actionable improvement>"
+      "feedback": "<max 12 words>",
+      "tip": "<max 12 words>"
     },
     {
       "category": "Inclusive Language",
       "score": <0-10>,
-      "feedback": "<one sentence>",
-      "tip": "<one actionable improvement>"
+      "feedback": "<max 12 words>",
+      "tip": "<max 12 words>"
     }
   ],
-  "top_wins": ["<thing they do well 1>", "<thing they do well 2>"],
-  "top_fixes": ["<most impactful fix 1>", "<most impactful fix 2>", "<most impactful fix 3>"]
+  "top_wins": ["<max 10 words>", "<max 10 words>"],
+  "top_fixes": ["<max 10 words>", "<max 10 words>", "<max 10 words>"]
 }
 
 Scoring criteria:
 
 Plain Language (0-10):
-  - 8-10: Short sentences, everyday words, easy to follow
-  - 4-7: Mix of simple and complex language
-  - 0-3: Dense, academic, or overly formal writing
+  8-10: Short sentences, everyday words. 4-7: Mix of simple and complex. 0-3: Dense or overly formal.
 
 Clarity & Structure (0-10):
-  - 8-10: Clear sections, bullet points, logical flow
-  - 4-7: Some structure but could be clearer
-  - 0-3: Wall of text, no clear sections
+  8-10: Clear sections, logical flow. 4-7: Some structure. 0-3: Wall of text.
 
 Jargon & Buzzwords (0-10):
-  - 8-10: Minimal jargon, explains technical terms
-  - 4-7: Some jargon but manageable
-  - 0-3: Heavy buzzwords ("synergy", "rockstar", "ninja", "disruptive", "leverage")
+  8-10: Minimal jargon. 4-7: Some jargon. 0-3: Heavy buzzwords (synergy, rockstar, ninja, leverage).
 
 Sentence Length (0-10):
-  - 8-10: Most sentences under 20 words
-  - 4-7: Mix of short and long sentences
-  - 0-3: Many sentences over 30 words
+  8-10: Most sentences under 20 words. 4-7: Mixed. 0-3: Many sentences over 30 words.
 
 Inclusive Language (0-10):
-  - 8-10: Welcoming, no ableist or exclusionary phrases
-  - 4-7: Mostly inclusive with minor issues
-  - 0-3: Contains ableist idioms or exclusionary language
+  8-10: Welcoming, no ableist phrases. 4-7: Mostly inclusive. 0-3: Ableist or exclusionary language.
 
-Grade scale:
-  A = 85-100, B = 70-84, C = 55-69, D = 40-54, F = 0-39
+Grade: A=85-100, B=70-84, C=55-69, D=40-54, F=0-39
 
-IMPORTANT: Return ONLY valid JSON. No markdown. No explanation outside the JSON.
+IMPORTANT: Keep ALL text values SHORT. Return ONLY valid JSON. No markdown.
 """
 
 
@@ -189,7 +178,7 @@ Experience:
                     config=genai.types.GenerateContentConfig(
                         system_instruction=SYSTEM_PROMPT,
                         temperature=0.2,
-                        max_output_tokens=2048,
+                        max_output_tokens=4096,
                         response_mime_type="application/json",
                     ),
                 )
