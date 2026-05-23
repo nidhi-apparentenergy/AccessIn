@@ -557,38 +557,81 @@ function dismissToast(toast) {
  *   "You" indicator        : .msg-s-message-group--outgoing, [data-view-name*="outgoing"]
  */
 
-// Tracks the last seen message element to avoid double-firing
+// Tracks the last seen message to avoid double-firing
 let lastSeenMsgId = null;
+// Cooldown — don't fire more than once per second
+let lastFlashTime = 0;
+
+// All known LinkedIn message node selectors (class-based + data-view-name-based)
+// LinkedIn changes these frequently; we cast a wide net.
+const MSG_NODE_SELECTORS = [
+    '.msg-s-event-listitem',
+    '.msg-s-message-list__event',
+    '.msg-convo-wrapper',
+    '[data-view-name="message-list-item"]',
+    '[data-view-name*="message-list-item"]',
+    '[class*="msg-s-event"]',
+    '[class*="msg-s-message-list"]',
+];
+
+// Outgoing message indicators
+const OUTGOING_SELECTORS = [
+    '.msg-s-message-group--outgoing',
+    '[data-view-name*="outgoing"]',
+    '[class*="outgoing"]',
+];
+
+function isOutgoingNode(node) {
+    for (const sel of OUTGOING_SELECTORS) {
+        if (node.matches?.(sel) || node.closest?.(sel)) return true;
+    }
+    return false;
+}
+
+function findMessageNode(node) {
+    if (!(node instanceof HTMLElement)) return null;
+    // Direct match
+    for (const sel of MSG_NODE_SELECTORS) {
+        if (node.matches?.(sel)) return node;
+    }
+    // Descendant match
+    for (const sel of MSG_NODE_SELECTORS) {
+        const inner = node.querySelector(sel);
+        if (inner) return inner;
+    }
+    return null;
+}
 
 function handleNewMessageNode(node) {
     if (!visualAlertsEnabled) return;
     if (!(node instanceof HTMLElement)) return;
+    if (isOutgoingNode(node)) return;
 
-    // We only care about incoming message events
-    const isOutgoing =
-        node.classList.contains('msg-s-message-group--outgoing') ||
-        node.closest('.msg-s-message-group--outgoing') ||
-        node.getAttribute('data-view-name')?.includes('outgoing');
-
-    if (isOutgoing) return;
+    // Cooldown — max one flash per second
+    const now = Date.now();
+    if (now - lastFlashTime < 1000) return;
+    lastFlashTime = now;
 
     // Extract sender name — try several selectors
     const senderEl =
         node.querySelector('.msg-s-message-group__name') ||
         node.querySelector('.msg-s-event-listitem__link') ||
-        node.closest('.msg-s-message-group')?.querySelector('.msg-s-message-group__name');
+        node.querySelector('[class*="message-group__name"]') ||
+        node.querySelector('[class*="participant-name"]') ||
+        node.closest('[class*="msg-s-message-group"]')?.querySelector('[class*="name"]');
 
-    const sender = senderEl?.innerText?.trim() || 'Someone';
+    const sender = senderEl?.innerText?.trim() || 'New message';
 
     // Extract message preview text
     const bodyEl =
         node.querySelector('.msg-s-event-listitem__body') ||
-        node.querySelector('.msg-s-message-list__event p') ||
+        node.querySelector('[class*="event-listitem__body"]') ||
+        node.querySelector('[class*="message-body"]') ||
         node.querySelector('p');
 
     const preview = bodyEl?.innerText?.trim().slice(0, 80) || '';
 
-    // Deduplicate — LinkedIn sometimes re-renders the same node
+    // Deduplicate
     const msgId = sender + ':' + preview;
     if (msgId === lastSeenMsgId) return;
     lastSeenMsgId = msgId;
@@ -598,32 +641,13 @@ function handleNewMessageNode(node) {
 }
 
 // Observe the full document for messaging panel mutations.
-// LinkedIn is a SPA — the messaging panel mounts/unmounts dynamically,
-// so we watch document.body rather than a specific container.
+// LinkedIn is a SPA — the messaging panel mounts/unmounts dynamically.
 const msgObserver = new MutationObserver((mutations) => {
     if (!visualAlertsEnabled) return;
     for (const mutation of mutations) {
         for (const node of mutation.addedNodes) {
-            // Direct match
-            if (
-                node instanceof HTMLElement && (
-                    node.classList.contains('msg-s-event-listitem') ||
-                    node.classList.contains('msg-s-message-list__event') ||
-                    node.getAttribute?.('data-view-name')?.includes('message-list-item')
-                )
-            ) {
-                handleNewMessageNode(node);
-                continue;
-            }
-
-            // Descendant match — new message may be nested inside a wrapper
-            if (node instanceof HTMLElement) {
-                const inner =
-                    node.querySelector('.msg-s-event-listitem') ||
-                    node.querySelector('.msg-s-message-list__event') ||
-                    node.querySelector('[data-view-name*="message-list-item"]');
-                if (inner) handleNewMessageNode(inner);
-            }
+            const msgNode = findMessageNode(node);
+            if (msgNode) handleNewMessageNode(msgNode);
         }
     }
 });
@@ -918,6 +942,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     }
     if (msg.type === 'SET_ALERT_COLOR') {
         alertColor = msg.color;
+        sendResponse({ ok: true });
+    }
+    if (msg.type === 'TEST_FLASH') {
+        triggerFlash();
+        showToast('Test', 'Flash is working! 🎉');
         sendResponse({ ok: true });
     }
 });
