@@ -119,6 +119,65 @@ document.getElementById('analyzeBtn').addEventListener('click', async () => {
     }
 });
 
+// ── Profile Accessibility Score ───────────────────────────────────────────────
+
+document.getElementById('profileScoreBtn').addEventListener('click', async () => {
+    const btn = document.getElementById('profileScoreBtn');
+    btn.disabled = true;
+    btn.textContent = 'Scoring...';
+    setStatus('profileScoreStatus', 'Reading profile...', '');
+
+    try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+        if (!tab.url || !tab.url.includes('linkedin.com/in/')) {
+            setStatus('profileScoreStatus', 'Open a LinkedIn profile page first.', 'error');
+            return;
+        }
+
+        let profileData = null;
+        try {
+            const resp = await chrome.tabs.sendMessage(tab.id, { type: 'GET_PROFILE_CONTENT' });
+            profileData = resp?.profile;
+        } catch {
+            setStatus('profileScoreStatus', 'Could not read the page. Try refreshing.', 'error');
+            return;
+        }
+
+        if (!profileData || !profileData.headline && !profileData.about) {
+            setStatus('profileScoreStatus', 'No profile content found.', 'error');
+            return;
+        }
+
+        setStatus('profileScoreStatus', 'Sending to AI...', '');
+
+        const res = await fetch(`${API_BASE}/profile-score`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(profileData),
+        });
+
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || `Server error ${res.status}`);
+        }
+
+        const data = await res.json();
+        await chrome.tabs.sendMessage(tab.id, { type: 'INJECT_PROFILE_SCORE', data });
+
+        setStatus('profileScoreStatus', 'Score injected on the page!', 'success');
+        setTimeout(() => {
+            try { window.close(); } catch (_) { }
+        }, 1200);
+
+    } catch (err) {
+        setStatus('profileScoreStatus', `Error: ${err.message}`, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Score this profile';
+    }
+});
+
 // ── Post Simplifier ───────────────────────────────────────────────────────────
 
 async function sendSimplifyPrefsToActiveTab(prefs) {
