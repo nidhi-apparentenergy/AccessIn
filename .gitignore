@@ -6,8 +6,9 @@ __pycache__/
 *.pyc
 *.pyo
 
-# Environment
-.env
+# Logs
+uvicorn.log
+*.log
 backend/.env
 
 # OS

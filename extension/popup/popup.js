@@ -22,15 +22,18 @@ const DEFAULT_SIMPLIFY_PREFS = {
     enabled: true,
 };
 
-// Focus Lock
+// ── Focus Lock ────────────────────────────────────────────────────────────────
 
 document.getElementById('setBtn').addEventListener('click', () => {
     const intent = document.getElementById('intentInput').value.trim();
     if (!intent) return;
-
     chrome.storage.local.set({ intentLock: intent, lockActive: true }, () => {
         chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-            chrome.tabs.sendMessage(tabs[0].id, { type: 'ACTIVATE_LOCK', intent });
+            if (!tabs[0]?.id) return;
+            chrome.tabs.sendMessage(tabs[0].id, { type: 'ACTIVATE_LOCK', intent }, () => {
+                // Ignore errors — content script may not be loaded on non-LinkedIn tabs
+                void chrome.runtime.lastError;
+            });
         });
         setStatus('status', 'Focus locked!');
     });
@@ -39,7 +42,10 @@ document.getElementById('setBtn').addEventListener('click', () => {
 document.getElementById('clearBtn').addEventListener('click', () => {
     chrome.storage.local.set({ lockActive: false }, () => {
         chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-            chrome.tabs.sendMessage(tabs[0].id, { type: 'DEACTIVATE_LOCK' });
+            if (!tabs[0]?.id) return;
+            chrome.tabs.sendMessage(tabs[0].id, { type: 'DEACTIVATE_LOCK' }, () => {
+                void chrome.runtime.lastError;
+            });
         });
         setStatus('status', 'Unlocked.');
     });
@@ -52,7 +58,7 @@ chrome.storage.local.get(['intentLock', 'lockActive'], (data) => {
     }
 });
 
-// Job Analyzer
+// ── Job Analyzer ──────────────────────────────────────────────────────────────
 
 document.getElementById('analyzeBtn').addEventListener('click', async () => {
     const btn = document.getElementById('analyzeBtn');
@@ -99,7 +105,12 @@ document.getElementById('analyzeBtn').addEventListener('click', async () => {
         await chrome.tabs.sendMessage(tab.id, { type: 'INJECT_ANALYSIS', data });
 
         setStatus('analyzeStatus', 'Analysis injected on the page!', 'success');
-        setTimeout(() => window.close(), 1200);
+
+        // Guard against already-closed popup
+        setTimeout(() => {
+            try { window.close(); } catch (_) { /* popup already closed */ }
+        }, 1200);
+
     } catch (err) {
         setStatus('analyzeStatus', `Error: ${err.message}`, 'error');
     } finally {
@@ -108,7 +119,7 @@ document.getElementById('analyzeBtn').addEventListener('click', async () => {
     }
 });
 
-// Post Simplifier
+// ── Post Simplifier ───────────────────────────────────────────────────────────
 
 async function sendSimplifyPrefsToActiveTab(prefs) {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -120,7 +131,6 @@ function saveAndApplySimplifyPrefs() {
     const prefs = {
         enabled: Boolean(document.getElementById('simplifyPostsToggle')?.checked),
     };
-
     chrome.storage.local.set({ simplifyPrefs: prefs }, async () => {
         try {
             await sendSimplifyPrefsToActiveTab(prefs);
@@ -139,7 +149,7 @@ chrome.storage.local.get(['simplifyPrefs'], (data) => {
     if (toggle) toggle.checked = prefs.enabled;
 });
 
-// Reading Modes
+// ── Reading Modes ─────────────────────────────────────────────────────────────
 
 function getReadingPrefsFromForm() {
     const prefs = { ...DEFAULT_READING_PREFS };
@@ -189,8 +199,55 @@ chrome.storage.local.get(['readingPrefs'], (data) => {
     setReadingPrefsOnForm(prefs);
 });
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
 function setStatus(id, msg, type) {
     const el = document.getElementById(id);
+    if (!el) return;
     el.textContent = msg;
     el.className = 'status' + (type ? ' ' + type : '');
 }
+
+// ── Visual Alerts ─────────────────────────────────────────────────────────────
+
+const alertsToggle = document.getElementById('alertsToggle');
+const alertColorPicker = document.getElementById('alertColor');
+
+// Load saved prefs and reflect them in the UI
+chrome.storage.local.get(['visualAlertsEnabled', 'alertColor'], (prefs) => {
+    const enabled = typeof prefs.visualAlertsEnabled === 'boolean'
+        ? prefs.visualAlertsEnabled
+        : true;
+    alertsToggle.checked = enabled;
+    if (prefs.alertColor) alertColorPicker.value = prefs.alertColor;
+});
+
+alertsToggle.addEventListener('change', () => {
+    const enabled = alertsToggle.checked;
+    chrome.storage.local.set({ visualAlertsEnabled: enabled }, () => {
+        setStatus('alertStatus', enabled ? 'Flash alerts on.' : 'Flash alerts off.', enabled ? 'success' : '');
+        setTimeout(() => setStatus('alertStatus', '', ''), 2000);
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            if (!tabs[0]?.id) return;
+            chrome.tabs.sendMessage(
+                tabs[0].id,
+                { type: 'SET_VISUAL_ALERTS', enabled },
+                () => { void chrome.runtime.lastError; }
+            );
+        });
+    });
+});
+
+alertColorPicker.addEventListener('input', () => {
+    const color = alertColorPicker.value;
+    chrome.storage.local.set({ alertColor: color }, () => {
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            if (!tabs[0]?.id) return;
+            chrome.tabs.sendMessage(
+                tabs[0].id,
+                { type: 'SET_ALERT_COLOR', color },
+                () => { void chrome.runtime.lastError; }
+            );
+        });
+    });
+});
