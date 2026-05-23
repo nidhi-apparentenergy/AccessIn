@@ -6,10 +6,8 @@
 </head>
 <body>
     <div class="container">
-
-        <!-- Focus Lock -->
         <section class="section">
-            <p class="label">🎯 Session Focus</p>
+            <p class="label">Session Focus</p>
             <input type="text" id="intentInput" placeholder="e.g. apply to 2 jobs" />
             <div class="row">
                 <button id="setBtn">Lock in</button>
@@ -20,14 +18,66 @@
 
         <hr />
 
-        <!-- Job Analyzer -->
         <section class="section">
-            <p class="label">🧠 Analyze Job Posting</p>
+            <p class="label">Analyze Job Posting</p>
             <p class="hint">Open a LinkedIn job page, then click below.</p>
             <button id="analyzeBtn">Analyze this job</button>
             <div id="analyzeStatus" class="status"></div>
         </section>
 
+        <hr />
+
+        <section class="section">
+            <p class="label">Post Simplifier</p>
+            <p class="hint">Adds a Simplify button to long LinkedIn posts.</p>
+
+            <label class="toggle">
+                <input type="checkbox" id="simplifyPostsToggle" />
+                <span>Show simplify buttons</span>
+            </label>
+
+            <div id="simplifyStatus" class="status"></div>
+        </section>
+
+        <hr />
+
+        <section class="section">
+            <p class="label">Reading Modes</p>
+            <p class="hint">Make LinkedIn easier to read and less overwhelming.</p>
+
+            <label class="toggle">
+                <input type="checkbox" id="largerTextToggle" />
+                <span>Larger text</span>
+            </label>
+
+            <label class="toggle">
+                <input type="checkbox" id="spacingToggle" />
+                <span>Increased spacing</span>
+            </label>
+
+            <label class="toggle">
+                <input type="checkbox" id="dyslexiaFontToggle" />
+                <span>Dyslexia-friendly font</span>
+            </label>
+
+            <label class="toggle">
+                <input type="checkbox" id="highContrastToggle" />
+                <span>High contrast</span>
+            </label>
+
+            <label class="toggle">
+                <input type="checkbox" id="reduceMotionToggle" />
+                <span>Reduce animations</span>
+            </label>
+
+            <label class="toggle">
+                <input type="checkbox" id="hideClutterToggle" />
+                <span>Hide sidebars and feed clutter</span>
+            </label>
+
+            <button id="resetReadingBtn" class="secondary full-width">Reset reading modes</button>
+            <div id="readingStatus" class="status"></div>
+        </section>
     </div>
     <script src="popup.js"></script>
 </body>

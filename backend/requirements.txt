@@ -5,4 +5,4 @@ anthropic
 python-dotenv
 Pillow
 httpx
-google-generativeai
+google-genai

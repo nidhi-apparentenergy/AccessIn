@@ -531,9 +531,453 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         sendResponse({ ok: true });
         return true;
     }
+    if (msg.type === 'APPLY_READING_PREFS') {
+        applyReadingPrefs(msg.prefs);
+        sendResponse({ ok: true });
+        return true;
+    }
+    if (msg.type === 'APPLY_SIMPLIFY_PREFS') {
+        applySimplifyPrefs(msg.prefs);
+        sendResponse({ ok: true });
+        return true;
+    }
     if (msg.type === 'ACTIVATE_LOCK') injectBanner(msg.intent);
     if (msg.type === 'DEACTIVATE_LOCK') removeBanner();
 });
+
+// ==========================================
+// FEATURE 4: POST SIMPLIFIER
+// Adds inline simplify buttons to long LinkedIn posts.
+// ==========================================
+
+const SIMPLIFY_API_URL = 'http://localhost:8000/simplify';
+const MIN_SIMPLIFY_CHARS = 120;
+const DEFAULT_SIMPLIFY_PREFS = {
+    enabled: true,
+};
+
+let simplifyPrefs = { ...DEFAULT_SIMPLIFY_PREFS };
+let simplifyObserver = null;
+
+function ensureSimplifierStyles() {
+    if (document.getElementById('accessplus-simplifier-styles')) return;
+
+    const style = document.createElement('style');
+    style.id = 'accessplus-simplifier-styles';
+    style.textContent = `
+        .accessplus-simplify-btn {
+            margin: 8px 0;
+            padding: 6px 12px;
+            border: 1px solid #0a66c2;
+            border-radius: 16px;
+            background: #ffffff;
+            color: #0a66c2;
+            cursor: pointer;
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            font-size: 13px;
+            font-weight: 700;
+        }
+
+        .accessplus-simplify-btn:hover {
+            background: #eef6ff;
+        }
+
+        .accessplus-simplify-btn:disabled {
+            border-color: #a0b4c8;
+            color: #6b7c8f;
+            cursor: wait;
+        }
+
+        .accessplus-simplified-panel {
+            margin: 10px 0;
+            padding: 12px;
+            border-left: 4px solid #0a66c2;
+            border-radius: 6px;
+            background: #f3f8ff;
+            color: #1f2933;
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            font-size: 14px;
+            line-height: 1.55;
+        }
+
+        .accessplus-simplified-title {
+            margin-bottom: 6px;
+            color: #0a66c2;
+            font-size: 13px;
+            font-weight: 800;
+            text-transform: uppercase;
+        }
+
+        .accessplus-simplified-panel ul {
+            margin: 8px 0;
+            padding-left: 20px;
+        }
+
+        .accessplus-simplified-panel li {
+            margin: 4px 0;
+        }
+
+        .accessplus-simplified-action {
+            margin-top: 8px;
+            font-weight: 700;
+        }
+
+        #accessplus-simplify-visible-btn {
+            position: fixed;
+            right: 20px;
+            bottom: 88px;
+            z-index: 999999;
+            padding: 10px 14px;
+            border: none;
+            border-radius: 8px;
+            background: #0a66c2;
+            color: #ffffff;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+            cursor: pointer;
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            font-size: 13px;
+            font-weight: 800;
+        }
+
+        #accessplus-simplify-visible-btn:hover {
+            background: #004182;
+        }
+    `;
+    document.head.appendChild(style);
+}
+
+function getPostText(post) {
+    const selectors = [
+        '.feed-shared-update-v2__description',
+        '.update-components-text',
+        '.update-components-update-v2__commentary',
+        '.break-words',
+        '.feed-shared-text',
+        '[data-test-id*="main-feed-activity-card"] span[dir="ltr"]',
+        'span[dir="ltr"]',
+    ];
+
+    for (const selector of selectors) {
+        const nodes = Array.from(post.querySelectorAll(selector));
+        const text = nodes
+            .filter(node => !node.closest('button, nav, footer, [role="button"], .social-details-social-counts'))
+            .map(node => node.innerText?.trim())
+            .filter(Boolean)
+            .join('\n')
+            .trim();
+
+        if (text.length >= MIN_SIMPLIFY_CHARS) return text;
+    }
+
+    const fallback = post.innerText?.trim() || '';
+    if (fallback.length >= MIN_SIMPLIFY_CHARS && fallback.length <= 6000) return fallback;
+    return '';
+}
+
+function findLinkedInPosts() {
+    const selectors = [
+        '.feed-shared-update-v2',
+        '.occludable-update',
+        '.fie-impression-container',
+        '.update-components-update-v2',
+        '[role="dialog"]',
+        '[data-id*="urn:li:activity"]',
+        '[data-urn*="urn:li:activity"]',
+        'article',
+        '[data-urn*="activity"]',
+    ];
+
+    return Array.from(document.querySelectorAll(selectors.join(',')))
+        .filter(post => post instanceof HTMLElement)
+        .filter(post => getPostText(post));
+}
+
+function isMostlyVisible(element) {
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 &&
+        rect.height > 0 &&
+        rect.bottom > 80 &&
+        rect.top < window.innerHeight - 80;
+}
+
+function findBestVisiblePost() {
+    const posts = findLinkedInPosts()
+        .filter(isMostlyVisible)
+        .map(post => ({ post, text: getPostText(post) }))
+        .filter(item => item.text)
+        .sort((a, b) => b.text.length - a.text.length);
+
+    return posts[0] || null;
+}
+
+function escapeHTML(value) {
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+function renderSimplifiedPanel(data) {
+    const keyPoints = (data.key_points || [])
+        .map(point => `<li>${escapeHTML(point)}</li>`)
+        .join('');
+
+    return `
+        <div class="accessplus-simplified-title">Simplified version</div>
+        <div>${escapeHTML(data.simplified_text)}</div>
+        ${keyPoints ? `<ul>${keyPoints}</ul>` : ''}
+        <div class="accessplus-simplified-action">Action: ${escapeHTML(data.action_needed || 'No action needed')}</div>
+    `;
+}
+
+async function simplifyPostText(text, button, panel) {
+    button.disabled = true;
+    button.textContent = 'Simplifying...';
+    panel.innerHTML = '<div class="accessplus-simplified-title">Simplifying</div><div>Please wait.</div>';
+
+    try {
+        const response = await fetch(SIMPLIFY_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text, context: 'LinkedIn post' }),
+        });
+
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.detail || `Server error ${response.status}`);
+        }
+
+        const data = await response.json();
+        panel.innerHTML = renderSimplifiedPanel(data);
+        button.textContent = 'Simplified';
+    } catch (error) {
+        panel.innerHTML = `
+            <div class="accessplus-simplified-title">Could not simplify</div>
+            <div>${escapeHTML(error.message)}</div>
+        `;
+        button.disabled = false;
+        button.textContent = 'Simplify';
+    }
+}
+
+function addSimplifyButtons() {
+    if (!simplifyPrefs.enabled) return;
+    ensureSimplifierStyles();
+    injectSimplifyVisibleButton();
+
+    findLinkedInPosts().forEach((post) => {
+        if (post.dataset.accessplusSimplifierReady === 'true') return;
+
+        const text = getPostText(post);
+        if (!text) return;
+
+        post.dataset.accessplusSimplifierReady = 'true';
+
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'accessplus-simplify-btn';
+        button.textContent = 'Simplify';
+
+        const panel = document.createElement('div');
+        panel.className = 'accessplus-simplified-panel';
+        panel.hidden = true;
+
+        button.addEventListener('click', async () => {
+            panel.hidden = false;
+            await simplifyPostText(text, button, panel);
+        });
+
+        const textAnchor = post.querySelector(
+            '.feed-shared-update-v2__description, .update-components-text, .update-components-update-v2__commentary, .feed-shared-text, .break-words, [dir="ltr"]'
+        );
+        const anchor = textAnchor || post.querySelector('.feed-shared-actor') || post.firstElementChild || post;
+
+        if (anchor && anchor !== post) {
+            anchor.insertAdjacentElement('afterend', panel);
+            anchor.insertAdjacentElement('afterend', button);
+        } else {
+            post.prepend(panel);
+            post.prepend(button);
+        }
+    });
+}
+
+function injectSimplifyVisibleButton() {
+    if (document.getElementById('accessplus-simplify-visible-btn')) return;
+
+    const button = document.createElement('button');
+    button.id = 'accessplus-simplify-visible-btn';
+    button.type = 'button';
+    button.textContent = 'Simplify visible post';
+
+    button.addEventListener('click', async () => {
+        const best = findBestVisiblePost();
+        if (!best) {
+            button.textContent = 'No long post found';
+            window.setTimeout(() => {
+                button.textContent = 'Simplify visible post';
+            }, 1500);
+            return;
+        }
+
+        let panel = best.post.querySelector(':scope > .accessplus-simplified-panel');
+        if (!panel) {
+            panel = document.createElement('div');
+            panel.className = 'accessplus-simplified-panel';
+            best.post.prepend(panel);
+        }
+
+        panel.hidden = false;
+        await simplifyPostText(best.text, button, panel);
+        button.textContent = 'Simplify visible post';
+        button.disabled = false;
+    });
+
+    document.body.appendChild(button);
+}
+
+function removeSimplifyButtons() {
+    document.querySelectorAll('.accessplus-simplify-btn, .accessplus-simplified-panel, #accessplus-simplify-visible-btn')
+        .forEach(el => el.remove());
+
+    findLinkedInPosts().forEach((post) => {
+        delete post.dataset.accessplusSimplifierReady;
+    });
+}
+
+function applySimplifyPrefs(prefs = DEFAULT_SIMPLIFY_PREFS) {
+    simplifyPrefs = { ...DEFAULT_SIMPLIFY_PREFS, ...prefs };
+
+    if (simplifyPrefs.enabled) {
+        addSimplifyButtons();
+    } else {
+        removeSimplifyButtons();
+    }
+}
+
+function startSimplifierObserver() {
+    if (simplifyObserver) return;
+
+    simplifyObserver = new MutationObserver(() => {
+        window.clearTimeout(startSimplifierObserver.scanTimer);
+        startSimplifierObserver.scanTimer = window.setTimeout(addSimplifyButtons, 500);
+    });
+
+    simplifyObserver.observe(document.body, { childList: true, subtree: true });
+    window.setInterval(addSimplifyButtons, 2000);
+}
+
+// ==========================================
+// FEATURE 5: READING MODES
+// Applies dyslexia-friendly and neurodivergent-friendly display options.
+// ==========================================
+
+const DEFAULT_READING_PREFS = {
+    largerText: false,
+    increasedSpacing: false,
+    dyslexiaFont: false,
+    highContrast: false,
+    reduceMotion: false,
+    hideClutter: false,
+};
+
+function ensureReadingModeStyles() {
+    if (document.getElementById('accessplus-reading-mode-styles')) return;
+
+    const style = document.createElement('style');
+    style.id = 'accessplus-reading-mode-styles';
+    style.textContent = `
+        html.accessplus-larger-text body,
+        html.accessplus-larger-text p,
+        html.accessplus-larger-text span,
+        html.accessplus-larger-text li,
+        html.accessplus-larger-text a,
+        html.accessplus-larger-text button,
+        html.accessplus-larger-text input,
+        html.accessplus-larger-text textarea {
+            font-size: 18px !important;
+        }
+
+        html.accessplus-spacing body,
+        html.accessplus-spacing p,
+        html.accessplus-spacing span,
+        html.accessplus-spacing li {
+            line-height: 1.8 !important;
+            letter-spacing: 0.04em !important;
+            word-spacing: 0.12em !important;
+        }
+
+        html.accessplus-dyslexia-font body,
+        html.accessplus-dyslexia-font p,
+        html.accessplus-dyslexia-font span,
+        html.accessplus-dyslexia-font li,
+        html.accessplus-dyslexia-font a,
+        html.accessplus-dyslexia-font button,
+        html.accessplus-dyslexia-font input,
+        html.accessplus-dyslexia-font textarea {
+            font-family: Verdana, Arial, Tahoma, sans-serif !important;
+        }
+
+        html.accessplus-high-contrast body {
+            background: #ffffff !important;
+            color: #111111 !important;
+        }
+
+        html.accessplus-high-contrast main,
+        html.accessplus-high-contrast section,
+        html.accessplus-high-contrast article,
+        html.accessplus-high-contrast div[class*="feed"],
+        html.accessplus-high-contrast div[class*="jobs"],
+        html.accessplus-high-contrast div[class*="msg"] {
+            background-color: #ffffff !important;
+            color: #111111 !important;
+        }
+
+        html.accessplus-high-contrast a,
+        html.accessplus-high-contrast button {
+            color: #004182 !important;
+        }
+
+        html.accessplus-high-contrast img,
+        html.accessplus-high-contrast video {
+            filter: contrast(1.15) saturate(1.05) !important;
+        }
+
+        html.accessplus-reduce-motion *,
+        html.accessplus-reduce-motion *::before,
+        html.accessplus-reduce-motion *::after {
+            animation-duration: 0.001s !important;
+            animation-iteration-count: 1 !important;
+            scroll-behavior: auto !important;
+            transition-duration: 0.001s !important;
+        }
+
+        html.accessplus-hide-clutter aside,
+        html.accessplus-hide-clutter [class*="right-rail"],
+        html.accessplus-hide-clutter [class*="ad-banner"],
+        html.accessplus-hide-clutter [class*="premium"],
+        html.accessplus-hide-clutter [data-view-name="feed-full-recommendations"] {
+            display: none !important;
+        }
+    `;
+    document.head.appendChild(style);
+}
+
+function applyReadingPrefs(prefs = DEFAULT_READING_PREFS) {
+    ensureReadingModeStyles();
+
+    const mergedPrefs = { ...DEFAULT_READING_PREFS, ...prefs };
+    const root = document.documentElement;
+
+    root.classList.toggle('accessplus-larger-text', mergedPrefs.largerText);
+    root.classList.toggle('accessplus-spacing', mergedPrefs.increasedSpacing);
+    root.classList.toggle('accessplus-dyslexia-font', mergedPrefs.dyslexiaFont);
+    root.classList.toggle('accessplus-high-contrast', mergedPrefs.highContrast);
+    root.classList.toggle('accessplus-reduce-motion', mergedPrefs.reduceMotion);
+    root.classList.toggle('accessplus-hide-clutter', mergedPrefs.hideClutter);
+}
 
 // ==========================================
 // INITIALIZATION
@@ -544,4 +988,23 @@ chrome.storage.local.get(['intentLock', 'lockActive'], (data) => {
     }
 });
 
+chrome.storage.local.get(['readingPrefs'], (data) => {
+    applyReadingPrefs(data.readingPrefs);
+});
+
+chrome.storage.local.get(['simplifyPrefs'], (data) => {
+    applySimplifyPrefs(data.simplifyPrefs);
+    startSimplifierObserver();
+});
+
 injectTTSButton();
+
+window.setTimeout(() => {
+    chrome.storage.local.get(['simplifyPrefs'], (data) => {
+        const prefs = { ...DEFAULT_SIMPLIFY_PREFS, ...(data.simplifyPrefs || {}) };
+        if (prefs.enabled) {
+            ensureSimplifierStyles();
+            injectSimplifyVisibleButton();
+        }
+    });
+}, 1000);
