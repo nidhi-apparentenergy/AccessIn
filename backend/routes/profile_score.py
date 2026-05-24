@@ -65,21 +65,22 @@ class ProfileScoreResponse(BaseModel):
 # Corporate buzzwords that hurt readability for neurodivergent users
 JARGON_WORDS: set[str] = {
     "synergy", "synergize", "leverage", "leveraging", "leveraged",
-    "rockstar", "ninja", "wizard", "guru", "evangelist", "champion",
-    "disruptive", "disrupting", "disruption", "innovative", "innovation",
+    "rockstar", "ninja", "wizard", "guru", "evangelist",
+    "disruptive", "disrupting", "disruption",
     "thought leader", "thought leadership", "visionary",
-    "passionate", "passionate about", "driven", "self-driven",
     "go-getter", "go getter", "hustler", "hustle",
     "hit the ground running", "wear many hats", "wearing many hats",
     "move the needle", "move the dial", "boil the ocean",
-    "circle back", "deep dive", "bandwidth", "bandwidth for",
+    "circle back", "deep dive",
     "low-hanging fruit", "low hanging fruit", "paradigm shift",
     "value-add", "value add", "value proposition",
-    "ecosystem", "holistic", "robust", "scalable", "cutting-edge",
+    "holistic", "cutting-edge", "cutting edge",
     "best-in-class", "world-class", "best in class",
-    "dynamic", "results-driven", "results driven",
-    "proactive", "strategic thinker", "outside the box",
-    "game changer", "game-changer", "next level",
+    "results-driven", "results driven",
+    "strategic thinker", "outside the box",
+    "game changer", "game-changer",
+    "next level", "next-level",
+    "ecosystem", "bandwidth",
 }
 
 # Ableist / exclusionary phrases
@@ -126,7 +127,9 @@ def _avg_syllables_per_word(words: list[str]) -> float:
 # ── Category scorers (each returns int 0–10) ─────────────────────────────────
 
 def score_plain_language(text: str) -> tuple[int, dict]:
-    """Score based on average syllables per word (reading ease proxy)."""
+    """Score based on average syllables per word (reading ease proxy).
+    Calibrated for professional LinkedIn profiles where technical titles
+    and role names naturally have higher syllable counts."""
     words = _words(text)
     if not words:
         return 5, {"avg_syllables": 0, "word_count": 0}
@@ -134,17 +137,22 @@ def score_plain_language(text: str) -> tuple[int, dict]:
     avg_syl = _avg_syllables_per_word(words)
     word_count = len(words)
 
-    # avg syllables: ≤1.3 → easy, 1.3–1.6 → medium, >1.6 → hard
-    if avg_syl <= 1.25:
+    # LinkedIn profiles naturally average 1.6–2.2 syllables/word.
+    # We score relative to that baseline, not against casual speech.
+    # ≤1.6 → very plain, 1.6–1.8 → plain, 1.8–2.0 → moderate,
+    # 2.0–2.3 → complex, >2.3 → very complex
+    if avg_syl <= 1.60:
         raw = 10
-    elif avg_syl <= 1.35:
-        raw = 9
-    elif avg_syl <= 1.45:
+    elif avg_syl <= 1.75:
+        raw = 8
+    elif avg_syl <= 1.90:
         raw = 7
-    elif avg_syl <= 1.55:
-        raw = 5
-    elif avg_syl <= 1.65:
-        raw = 3
+    elif avg_syl <= 2.05:
+        raw = 6
+    elif avg_syl <= 2.20:
+        raw = 4
+    elif avg_syl <= 2.40:
+        raw = 2
     else:
         raw = 1
 
@@ -152,8 +160,11 @@ def score_plain_language(text: str) -> tuple[int, dict]:
 
 
 def score_sentence_length(text: str) -> tuple[int, dict]:
-    """Score based on % of sentences ≤ 20 words."""
-    sentences = _sentences(text)
+    """Score based on % of sentences ≤ 20 words.
+    Pipe-separated headline items are treated as separate items, not one sentence."""
+    # Treat | as a sentence boundary (common in LinkedIn headlines)
+    normalized = text.replace(' | ', '. ').replace('|', '. ')
+    sentences = _sentences(normalized)
     if not sentences:
         return 5, {"total_sentences": 0, "short_pct": 0}
 
@@ -216,31 +227,27 @@ def score_structure(headline: str, about: str, experience: str) -> tuple[int, di
     points = 0
     details = {}
 
-    # Has a headline
+    # Has a headline (most important — always visible)
     has_headline = len(headline.strip()) > 10
     details["has_headline"] = has_headline
     if has_headline:
-        points += 2
+        points += 4  # headline alone gives a solid base
 
-    # Headline is not too long (≤ 15 words is ideal)
+    # Headline is concise (≤ 20 words)
     headline_words = len(_words(headline))
     details["headline_words"] = headline_words
-    if has_headline and headline_words <= 15:
+    if has_headline and headline_words <= 20:
         points += 1
 
     # Has an about section
     has_about = len(about.strip()) > 50
     details["has_about"] = has_about
     if has_about:
-        points += 2
-
-    # About is a reasonable length (50–500 words — not too short, not a wall)
-    about_words = len(_words(about))
-    details["about_words"] = about_words
-    if 50 <= about_words <= 500:
-        points += 2
-    elif about_words > 0:
-        points += 1
+        points += 3
+        about_words = len(_words(about))
+        details["about_words"] = about_words
+        if 50 <= about_words <= 500:
+            points += 1
 
     # Has experience section
     has_exp = len(experience.strip()) > 30
@@ -248,9 +255,7 @@ def score_structure(headline: str, about: str, experience: str) -> tuple[int, di
     if has_exp:
         points += 2
 
-    # Cap at 10
-    raw = min(10, points)
-    return raw, details
+    return min(10, points), details
 
 
 def score_inclusive_language(text: str) -> tuple[int, dict]:
@@ -385,6 +390,7 @@ async def score_profile(req: ProfileScoreRequest):
 
     # ── Step 2: Ask Gemini only for feedback text ─────────────────────────────
     raw_text: str | None = None
+    feedback = None
     try:
         client = genai.Client(api_key=api_key)
         prompt = _build_feedback_prompt(req, scores)
@@ -418,16 +424,50 @@ async def score_profile(req: ProfileScoreRequest):
         raw_text = _strip_code_fences(response.text)
         feedback = json.loads(raw_text)
 
-    except (json.JSONDecodeError, Exception):
-        # If Gemini fails, fall back to generic feedback — scores still show
+    except json.JSONDecodeError:
+        feedback = None  # handled below
+    except Exception:
+        feedback = None  # handled below
+
+    # Build meaningful fallback feedback from the deterministic scores
+    if not feedback:
+        def _auto_feedback(cat: str, score: int, details: dict) -> tuple[str, str]:
+            if cat == "Plain Language":
+                avg = details.get("avg_syllables", 0)
+                fb = f"Avg {avg} syllables per word." if avg else "Language complexity detected."
+                tip = "Use shorter, everyday words where possible." if score < 7 else "Language is clear and readable."
+            elif cat == "Sentence Length":
+                pct = details.get("short_pct", 0)
+                fb = f"{pct}% of sentences are short." if pct else "Sentence length varies."
+                tip = "Break long sentences into shorter ones." if score < 7 else "Sentence length is good."
+            elif cat == "Jargon & Buzzwords":
+                hits = details.get("hits", [])
+                fb = f"Found: {', '.join(hits[:3])}." if hits else "No buzzwords detected."
+                tip = "Replace buzzwords with specific descriptions." if hits else "Keep avoiding vague buzzwords."
+            elif cat == "Clarity & Structure":
+                has_about = details.get("has_about", False)
+                fb = "Missing About section." if not has_about else "Profile has clear sections."
+                tip = "Add an About section to explain your work." if not has_about else "Keep sections well-organised."
+            else:  # Inclusive Language
+                found = details.get("found", [])
+                fb = f"Found: {', '.join(found[:2])}." if found else "No exclusionary language found."
+                tip = "Replace flagged phrases with neutral alternatives." if found else "Continue using inclusive language."
+            return fb, tip
+
         feedback = {
-            "summary": "Profile scored. See breakdown for details.",
+            "summary": f"Profile scored {total}/100 (Grade {grade}). "
+                       + ("Add an About section to improve your score." if not scores["Clarity & Structure"][1].get("has_about") else "Good structure overall."),
             "breakdown_feedback": {
-                cat: {"feedback": "See score above.", "tip": "Review this category."}
-                for cat in scores
+                cat: {"feedback": _auto_feedback(cat, score, details)[0],
+                      "tip": _auto_feedback(cat, score, details)[1]}
+                for cat, (score, details) in scores.items()
             },
-            "top_wins": ["Profile has content to evaluate."],
-            "top_fixes": ["Review low-scoring categories above."],
+            "top_wins": [
+                cat for cat, (score, _) in scores.items() if score >= 8
+            ][:2] or ["Profile has content to evaluate."],
+            "top_fixes": [
+                cat for cat, (score, _) in scores.items() if score < 6
+            ][:3] or ["Review low-scoring categories above."],
         }
 
     # ── Step 3: Assemble final response ──────────────────────────────────────
