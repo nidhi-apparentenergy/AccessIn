@@ -62,7 +62,7 @@ async def simplify_text(req: SimplifyRequest):
     try:
         client = genai.Client(api_key=api_key)
 
-        prompt = f"Simplify this LinkedIn text:\n\n{req.text}"
+        prompt = f"Simplify this LinkedIn text:\n\n{req.text[:4000]}"
         if req.context.strip():
             prompt += f"\n\nContext: {req.context}"
 
@@ -72,7 +72,8 @@ async def simplify_text(req: SimplifyRequest):
             config=genai.types.GenerateContentConfig(
                 system_instruction=SYSTEM_PROMPT,
                 temperature=0.2,
-                max_output_tokens=700,
+                max_output_tokens=2048,
+                response_mime_type="application/json",
             ),
         )
 

@@ -966,7 +966,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 // ==========================================
 
 const SIMPLIFY_API_URL = 'http://localhost:8000/simplify';
-const MIN_SIMPLIFY_CHARS = 120;
+const MIN_SIMPLIFY_CHARS = 120;  // ~20 words minimum
 const DEFAULT_SIMPLIFY_PREFS = {
     enabled: true,
 };
@@ -1062,20 +1062,26 @@ function ensureSimplifierStyles() {
 }
 
 function getPostText(post) {
-    const selectors = [
+    // Try specific text content selectors first (most precise)
+    const textSelectors = [
         '.feed-shared-update-v2__description',
         '.update-components-text',
         '.update-components-update-v2__commentary',
-        '.break-words',
         '.feed-shared-text',
-        '[data-test-id*="main-feed-activity-card"] span[dir="ltr"]',
-        'span[dir="ltr"]',
+        '.feed-shared-text__text-view',
+        '[class*="commentary"]',
+        '[class*="update-components-text"]',
+        '[class*="feed-shared-text"]',
     ];
 
-    for (const selector of selectors) {
+    for (const selector of textSelectors) {
         const nodes = Array.from(post.querySelectorAll(selector));
         const text = nodes
-            .filter(node => !node.closest('button, nav, footer, [role="button"], .social-details-social-counts'))
+            .filter(node => !node.closest(
+                'button, nav, footer, [role="button"], ' +
+                '.social-details-social-counts, .feed-shared-actor, ' +
+                '.update-components-actor, [class*="social-action"]'
+            ))
             .map(node => node.innerText?.trim())
             .filter(Boolean)
             .join('\n')
@@ -1084,35 +1090,72 @@ function getPostText(post) {
         if (text.length >= MIN_SIMPLIFY_CHARS) return text;
     }
 
-    const fallback = post.innerText?.trim() || '';
-    if (fallback.length >= MIN_SIMPLIFY_CHARS && fallback.length <= 6000) return fallback;
+    // Last resort: use all span[dir="ltr"] inside the post, excluding actor/header area
+    const actorEl = post.querySelector(
+        '.feed-shared-actor, .update-components-actor, [class*="actor"], [class*="author"]'
+    );
+    const spans = Array.from(post.querySelectorAll('span[dir="ltr"], p'))
+        .filter(el => !actorEl?.contains(el))
+        .filter(el => !el.closest('button, [role="button"], nav, .social-details-social-counts'));
+
+    const spanText = spans.map(s => s.innerText?.trim()).filter(Boolean).join('\n').trim();
+    if (spanText.length >= MIN_SIMPLIFY_CHARS && spanText.length <= 8000) return spanText;
+
     return '';
 }
 
 function findLinkedInPosts() {
-    const selectors = [
-        '.feed-shared-update-v2',
-        '.occludable-update',
-        '.fie-impression-container',
-        '.update-components-update-v2',
-        '[role="dialog"]',
-        '[data-id*="urn:li:activity"]',
-        '[data-urn*="urn:li:activity"]',
-        'article',
-        '[data-urn*="activity"]',
-    ];
+    // LinkedIn's DOM changes frequently. Instead of matching container class names,
+    // find elements that contain social action buttons (Like/Comment) — that's the
+    // definitive signature of a real post regardless of class name changes.
+    const results = new Set();
 
-    return Array.from(document.querySelectorAll(selectors.join(',')))
-        .filter(post => post instanceof HTMLElement)
+    // Find all Like or Comment buttons on the page
+    const actionButtons = Array.from(document.querySelectorAll(
+        'button[aria-label*="Like"], button[aria-label*="Comment"], ' +
+        'button[aria-label*="React"], button[aria-label*="like"], ' +
+        'button[aria-label*="comment"], [data-control-name="like"], ' +
+        '[data-control-name="comment"]'
+    ));
+
+    for (const btn of actionButtons) {
+        // Walk up to find the post container (max 12 levels)
+        let el = btn.parentElement;
+        for (let i = 0; i < 12; i++) {
+            if (!el || el === document.body) break;
+            const urn = el.getAttribute('data-urn') || el.getAttribute('data-id') || '';
+            const cls = (el.className || '').toString();
+            const tag = el.tagName;
+
+            if (
+                urn.includes('activity') ||
+                cls.includes('feed-shared-update') ||
+                cls.includes('occludable-update') ||
+                cls.includes('fie-impression') ||
+                cls.includes('update-components-update') ||
+                tag === 'ARTICLE' ||
+                // Generic: large enough container that has both text and actions
+                (el.offsetHeight > 150 && el.querySelectorAll('p, span[dir="ltr"]').length > 0)
+            ) {
+                results.add(el);
+                break;
+            }
+            el = el.parentElement;
+        }
+    }
+
+    return Array.from(results)
+        .filter(el => el instanceof HTMLElement)
         .filter(post => getPostText(post));
 }
 
 function isMostlyVisible(element) {
     const rect = element.getBoundingClientRect();
+    // Element is visible if any part of it is in the viewport
     return rect.width > 0 &&
         rect.height > 0 &&
-        rect.bottom > 80 &&
-        rect.top < window.innerHeight - 80;
+        rect.bottom > 100 &&           // not scrolled fully past
+        rect.top < window.innerHeight; // not below the fold
 }
 
 function findBestVisiblePost() {
@@ -1180,7 +1223,6 @@ async function simplifyPostText(text, button, panel) {
 function addSimplifyButtons() {
     if (!simplifyPrefs.enabled) return;
     ensureSimplifierStyles();
-    injectSimplifyVisibleButton();
 
     findLinkedInPosts().forEach((post) => {
         if (post.dataset.accessplusSimplifierReady === 'true') return;
@@ -1254,7 +1296,7 @@ function injectSimplifyVisibleButton() {
 }
 
 function removeSimplifyButtons() {
-    document.querySelectorAll('.accessplus-simplify-btn, .accessplus-simplified-panel, #accessplus-simplify-visible-btn')
+    document.querySelectorAll('.accessplus-simplify-btn, .accessplus-simplified-panel')
         .forEach(el => el.remove());
 
     findLinkedInPosts().forEach((post) => {
@@ -1419,7 +1461,7 @@ window.setTimeout(() => {
         const prefs = { ...DEFAULT_SIMPLIFY_PREFS, ...(data.simplifyPrefs || {}) };
         if (prefs.enabled) {
             ensureSimplifierStyles();
-            injectSimplifyVisibleButton();
+            addSimplifyButtons();
         }
     });
 }, 1000);
@@ -1433,73 +1475,69 @@ window.setTimeout(() => {
 function extractProfileContent() {
     const profile = {};
 
+    // ── Helper: get clean text from an element, stripping button/nav noise ───
+    function cleanText(el) {
+        if (!el) return '';
+        // Clone so we don't mutate the page
+        const clone = el.cloneNode(true);
+        // Remove buttons, links that are UI actions, icons, hidden elements
+        clone.querySelectorAll(
+            'button, [role="button"], svg, img, .visually-hidden, ' +
+            '[aria-hidden="true"], .artdeco-button, .pvs-list__footer-wrapper'
+        ).forEach(n => n.remove());
+        return clone.innerText?.trim() || '';
+    }
+
     // ── Name ─────────────────────────────────────────────────────────────────
-    // Try every known LinkedIn h1 pattern
     const nameEl =
         document.querySelector('h1.text-heading-xlarge') ||
         document.querySelector('h1[class*="heading"]') ||
         document.querySelector('h1[class*="title"]') ||
-        document.querySelector('.pv-top-card--list h1') ||
         document.querySelector('main h1');
     profile.name = nameEl?.innerText?.trim() || '';
 
     // ── Headline ──────────────────────────────────────────────────────────────
-    // The headline sits right below the name — grab the first non-empty div/span
-    // after the h1 that isn't a location or connection count
+    // Headline is the div directly after the h1 with the person's tagline
     const headlineEl =
         document.querySelector('.text-body-medium.break-words') ||
         document.querySelector('[data-generated-suggestion-target]') ||
-        document.querySelector('.pv-top-card-section__headline') ||
-        document.querySelector('[class*="top-card"] [class*="headline"]') ||
-        document.querySelector('[class*="profile-info"] [class*="subtitle"]');
+        document.querySelector('.pv-top-card-section__headline');
 
-    // Fallback: second meaningful text node after h1
-    if (!headlineEl && nameEl) {
-        let sibling = nameEl.nextElementSibling;
-        while (sibling) {
-            const t = sibling.innerText?.trim();
-            if (t && t.length > 5 && !/^\d+/.test(t)) {
+    if (headlineEl) {
+        profile.headline = headlineEl.innerText?.trim() || '';
+    } else if (nameEl) {
+        // Walk siblings after h1 — first short text that isn't location/connections
+        let sib = nameEl.nextElementSibling;
+        while (sib) {
+            const t = sib.innerText?.trim() || '';
+            // Skip location lines, connection counts, pronouns
+            if (t.length > 10 && t.length < 300 && !/^\d+/.test(t) &&
+                !t.includes('connection') && !t.includes('follower')) {
                 profile.headline = t;
                 break;
             }
-            sibling = sibling.nextElementSibling;
+            sib = sib.nextElementSibling;
         }
-    } else {
-        profile.headline = headlineEl?.innerText?.trim() || '';
     }
 
     // ── About ─────────────────────────────────────────────────────────────────
-    // Strategy 1: anchor by #about id
+    // Use the #about anchor — it's a reliable landmark LinkedIn always includes
     const aboutAnchor = document.getElementById('about');
     if (aboutAnchor) {
         const section = aboutAnchor.closest('section') || aboutAnchor.parentElement;
-        const text = section?.innerText?.replace(/^About\s*/i, '').trim();
-        if (text && text.length > 10) {
-            profile.about = text.slice(0, 3000);
+        if (section) {
+            const text = cleanText(section).replace(/^About\s*/i, '').trim();
+            // Must be real content — not just the heading
+            if (text.length > 20) profile.about = text.slice(0, 2000);
         }
     }
 
-    // Strategy 2: data-view-name
+    // Fallback: section with data-view-name containing "about"
     if (!profile.about) {
-        const aboutSection =
-            document.querySelector('[data-view-name*="profile-card-about"]') ||
-            document.querySelector('[data-view-name*="about"]');
-        const text = aboutSection?.innerText?.replace(/^About\s*/i, '').trim();
-        if (text && text.length > 10) profile.about = text.slice(0, 3000);
-    }
-
-    // Strategy 3: find any section whose heading says "About"
-    if (!profile.about) {
-        const headings = Array.from(document.querySelectorAll('h2, h3, span[class*="title"]'));
-        for (const h of headings) {
-            if (h.innerText?.trim().toLowerCase() === 'about') {
-                const section = h.closest('section') || h.parentElement?.parentElement;
-                const text = section?.innerText?.replace(/^About\s*/i, '').trim();
-                if (text && text.length > 10) {
-                    profile.about = text.slice(0, 3000);
-                    break;
-                }
-            }
+        const el = document.querySelector('[data-view-name*="profile-card-about"]');
+        if (el) {
+            const text = cleanText(el).replace(/^About\s*/i, '').trim();
+            if (text.length > 20) profile.about = text.slice(0, 2000);
         }
     }
 
@@ -1507,33 +1545,23 @@ function extractProfileContent() {
     const expAnchor = document.getElementById('experience');
     if (expAnchor) {
         const section = expAnchor.closest('section') || expAnchor.parentElement;
-        const text = section?.innerText?.replace(/^Experience\s*/i, '').trim();
-        if (text && text.length > 10) profile.experience = text.slice(0, 3000);
+        if (section) {
+            const text = cleanText(section).replace(/^Experience\s*/i, '').trim();
+            if (text.length > 20) profile.experience = text.slice(0, 2000);
+        }
     }
 
     if (!profile.experience) {
-        const expSection =
-            document.querySelector('[data-view-name*="profile-card-experience"]') ||
-            document.querySelector('[data-view-name*="experience"]');
-        const text = expSection?.innerText?.replace(/^Experience\s*/i, '').trim();
-        if (text && text.length > 10) profile.experience = text.slice(0, 3000);
-    }
-
-    // ── Last resort: grab the whole main profile card text ────────────────────
-    // If we still have nothing useful, pull from the main content area
-    if (!profile.headline && !profile.about) {
-        const mainContent =
-            document.querySelector('main') ||
-            document.querySelector('[class*="scaffold-layout__main"]') ||
-            document.querySelector('[class*="profile-view"]');
-        if (mainContent) {
-            const fullText = mainContent.innerText?.trim().slice(0, 5000) || '';
-            if (fullText.length > 50) {
-                // Use it as the "about" so we have something to score
-                profile.about = fullText;
-            }
+        const el = document.querySelector('[data-view-name*="profile-card-experience"]');
+        if (el) {
+            const text = cleanText(el).replace(/^Experience\s*/i, '').trim();
+            if (text.length > 20) profile.experience = text.slice(0, 2000);
         }
     }
+
+    // ── NOTE: No "last resort" full-page grab ─────────────────────────────────
+    // Grabbing <main> pulls in LinkedIn UI buttons, suggestions, ads etc.
+    // which pollutes the scoring. If we have at least a headline, that's enough.
 
     profile.profile_url = window.location.href;
     return profile;
