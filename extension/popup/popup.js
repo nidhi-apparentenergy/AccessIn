@@ -371,3 +371,25 @@ document.getElementById('testFlashBtn').addEventListener('click', async () => {
         setStatus('alertStatus', `Error: ${err.message}`, 'error');
     }
 });
+
+// ── Image Describer ──
+chrome.storage.local.get(['imageDescriberEnabled'], (data) => {
+    const toggle = document.getElementById('imageDescriberToggle');
+    if (toggle) toggle.checked = Boolean(data.imageDescriberEnabled);
+});
+
+document.getElementById('imageDescriberToggle')?.addEventListener('change', async (e) => {
+    const enabled = e.target.checked;
+    chrome.storage.local.set({ imageDescriberEnabled: enabled }, () => {
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            if (!tabs[0]?.id) return;
+            chrome.tabs.sendMessage(
+                tabs[0].id,
+                { type: 'APPLY_IMAGE_DESCRIBER_PREF', enabled },
+                () => { void chrome.runtime.lastError; }
+            );
+        });
+        setStatus('imageDescriberStatus', enabled ? 'Image describer on.' : 'Image describer off.', 'success');
+        setTimeout(() => setStatus('imageDescriberStatus', '', ''), 2000);
+    });
+});

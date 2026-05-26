@@ -1125,14 +1125,14 @@ function findBestVisiblePost() {
     return posts[0] || null;
 }
 
-function escapeHTML(value) {
-    return String(value)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
-}
+// function escapeHTML(value) {
+//     return String(value)
+//         .replace(/&/g, '&amp;')
+//         .replace(/</g, '&lt;')
+//         .replace(/>/g, '&gt;')
+//         .replace(/"/g, '&quot;')
+//         .replace(/'/g, '&#039;');
+// }
 
 function renderSimplifiedPanel(data) {
     const keyPoints = (data.key_points || [])
@@ -1720,3 +1720,215 @@ function injectProfileScorePanel(data) {
     document.body.appendChild(panel);
     document.getElementById('aps-close-btn').addEventListener('click', removeProfileScorePanel);
 }
+
+
+// ==========================================
+// FEATURE: IMAGE DESCRIBER
+// Fixed button like Read Aloud — describes
+// the most visible image on screen aloud.
+// ==========================================
+
+const DESCRIBE_API_URL = 'http://localhost:8000/describe';
+let imageDescriberEnabled = false;
+
+async function fetchImageAsBase64(imgUrl) {
+    try {
+        const res = await fetch(imgUrl);
+        const blob = await res.blob();
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                const base64 = reader.result.split(',')[1];
+                resolve({ base64, mimeType: blob.type || 'image/jpeg' });
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+        });
+    } catch (e) {
+        return null;
+    }
+}
+
+function findBestVisibleImage() {
+    const imgs = Array.from(document.querySelectorAll('img'));
+
+    const visible = imgs.filter(img => {
+        if (!img.src || img.src.startsWith('data:')) return false;
+        if (img.naturalWidth > 0 && img.naturalWidth < 100) return false;
+        const rect = img.getBoundingClientRect();
+        return rect.width > 100 &&
+               rect.top < window.innerHeight - 50 &&
+               rect.bottom > 50;
+    });
+
+    if (visible.length === 0) return null;
+
+    const centerY = window.innerHeight / 2;
+    return visible.sort((a, b) => {
+        const ar = a.getBoundingClientRect();
+        const br = b.getBoundingClientRect();
+        const aMid = (ar.top + ar.bottom) / 2;
+        const bMid = (br.top + br.bottom) / 2;
+        return Math.abs(aMid - centerY) - Math.abs(bMid - centerY);
+    })[0];
+}
+
+function injectImageDescriberButton() {
+    if (document.getElementById('accessin-describe-btn')) return;
+
+    const btn = document.createElement('button');
+    btn.id = 'accessin-describe-btn';
+    btn.textContent = '🖼️ Describe Image';
+    Object.assign(btn.style, {
+        position: 'fixed',
+        bottom: '130px',
+        right: '20px',
+        zIndex: '999999',
+        padding: '10px 16px',
+        backgroundColor: '#0a66c2',
+        color: 'white',
+        border: 'none',
+        borderRadius: '8px',
+        cursor: 'pointer',
+        boxShadow: '0 4px 6px rgba(0,0,0,0.2)',
+        fontFamily: '-apple-system, sans-serif',
+        fontWeight: 'bold',
+        fontSize: '13px',
+        textAlign: 'center',
+        lineHeight: '1.4',
+        display: 'block',
+    });
+
+    btn.addEventListener('click', async () => {
+        const img = findBestVisibleImage();
+        if (!img) {
+            btn.textContent = '❌ No image found';
+            setTimeout(() => { btn.textContent = '🖼️ Describe Image'; }, 2000);
+            return;
+        }
+
+        btn.textContent = '⏳ Describing...';
+        btn.disabled = true;
+
+        const context = img.alt || img.getAttribute('aria-label') || '';
+        const imgData = await fetchImageAsBase64(img.src);
+
+        if (!imgData) {
+            btn.textContent = '❌ Load failed';
+            btn.disabled = false;
+            return;
+        }
+
+        try {
+            const res = await fetch(DESCRIBE_API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    image_b64: imgData.base64,
+                    mime_type: imgData.mimeType,
+                    context: context
+                })
+            });
+
+            if (!res.ok) throw new Error(`Server error ${res.status}`);
+            const data = await res.json();
+
+            // Show floating description panel
+            let panel = document.getElementById('accessin-desc-panel');
+            if (!panel) {
+                panel = document.createElement('div');
+                panel.id = 'accessin-desc-panel';
+                Object.assign(panel.style, {
+                    position: 'fixed',
+                    bottom: '190px',
+                    right: '20px',
+                    zIndex: '999998',
+                    width: '280px',
+                    padding: '12px 16px',
+                    background: '#f0f7ff',
+                    borderLeft: '4px solid #0a66c2',
+                    borderRadius: '8px',
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                    fontFamily: '-apple-system, sans-serif',
+                    fontSize: '13px',
+                    lineHeight: '1.6',
+                    color: '#1a1a1a',
+                });
+                document.body.appendChild(panel);
+            }
+
+            panel.innerHTML = `
+                <div style="font-weight:700;color:#0a66c2;font-size:11px;
+                            text-transform:uppercase;margin-bottom:6px;">
+                    🖼️ Image Description
+                    <span id="accessin-desc-close" style="float:right;cursor:pointer;
+                          font-size:14px;color:#666;">✕</span>
+                </div>
+                <div>${data.description || 'No description available.'}</div>
+            `;
+
+            document.getElementById('accessin-desc-close')
+                .addEventListener('click', () => panel.remove());
+
+            // Speak it aloud
+            if (data.description) {
+                window.speechSynthesis.cancel();
+                const utterance = new SpeechSynthesisUtterance(data.description);
+                utterance.rate = 0.9;
+                window.speechSynthesis.speak(utterance);
+            }
+
+            btn.textContent = '✅ Described';
+            setTimeout(() => {
+                btn.textContent = '🖼️ Describe Image';
+                btn.disabled = false;
+            }, 3000);
+
+        } catch (err) {
+            console.error('[AccessIn] describe error:', err);
+            btn.textContent = '❌ Failed — retry';
+            btn.disabled = false;
+        }
+    });
+
+    document.body.appendChild(btn);
+}
+
+function removeImageDescriberButton() {
+    document.getElementById('accessin-describe-btn')?.remove();
+    document.getElementById('accessin-desc-panel')?.remove();
+}
+
+function applyImageDescriberPref(enabled) {
+    imageDescriberEnabled = enabled;
+    if (enabled) {
+        injectImageDescriberButton();
+    } else {
+        removeImageDescriberButton();
+    }
+}
+
+// Listen for toggle from popup
+chrome.runtime.onMessage.addListener((msg) => {
+    if (msg.type === 'APPLY_IMAGE_DESCRIBER_PREF') {
+        applyImageDescriberPref(msg.enabled);
+    }
+});
+
+// Load saved preference on page load
+chrome.storage.local.get(['imageDescriberEnabled'], (data) => {
+    applyImageDescriberPref(Boolean(data.imageDescriberEnabled));
+});
+
+// Also check every 2 seconds in case message was missed
+setInterval(() => {
+    chrome.storage.local.get(['imageDescriberEnabled'], (data) => {
+        const shouldBeEnabled = Boolean(data.imageDescriberEnabled);
+        const btnExists = Boolean(document.getElementById('accessin-describe-btn'));
+        if (shouldBeEnabled && !btnExists) {
+            injectImageDescriberButton();
+        } else if (!shouldBeEnabled && btnExists) {
+            removeImageDescriberButton();
+        }
+    });
+}, 2000);

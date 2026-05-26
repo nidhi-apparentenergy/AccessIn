@@ -136,10 +136,14 @@ async def describe_image(req: DescribeRequest):
             raise last_error  # type: ignore[misc]
 
         raw = _strip_code_fences(response.text)
+        # Fix multiline strings inside JSON that break the parser
+        raw = ' '.join(raw.splitlines())
         result = json.loads(raw)
         return DescribeResponse(**result)
 
     except json.JSONDecodeError as e:
+        print(f"RAW GEMINI RESPONSE: {raw}")
         raise HTTPException(status_code=502, detail=f"Gemini returned invalid JSON: {e}")
     except Exception as e:
+        print(f"DESCRIBE ERROR: {e}")
         raise HTTPException(status_code=500, detail=f"Description failed: {e}")
