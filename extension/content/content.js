@@ -1809,7 +1809,7 @@ function injectImageDescriberButton() {
     btn.textContent = '🖼️ Describe Image';
     Object.assign(btn.style, {
         position: 'fixed',
-        bottom: '130px',
+        bottom: '80px',
         right: '20px',
         zIndex: '999999',
         padding: '10px 16px',
