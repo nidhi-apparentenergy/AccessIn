@@ -120,7 +120,8 @@ async def describe_image(req: DescribeRequest):
                     config=types.GenerateContentConfig(
                         system_instruction=SYSTEM_PROMPT,
                         temperature=0.2,
-                        max_output_tokens=512,
+                        max_output_tokens=1024,
+                        response_mime_type="application/json",
                     ),
                 )
                 break  # success — stop trying
@@ -136,9 +137,30 @@ async def describe_image(req: DescribeRequest):
             raise last_error  # type: ignore[misc]
 
         raw = _strip_code_fences(response.text)
-        # Fix multiline strings inside JSON that break the parser
+        # Collapse newlines inside JSON string values without breaking structure
         raw = ' '.join(raw.splitlines())
+
+        # Guard: if Gemini truncated mid-response, the JSON will be incomplete.
+        # Attempt to close any open string/object so json.loads has a chance.
+        if not raw.rstrip().endswith('}'):
+            # Find the last complete key-value pair we can safely close off.
+            # Strategy: truncate to last `"` boundary and close the JSON object.
+            last_quote = raw.rfind('"')
+            if last_quote > 0 and raw[:last_quote].rstrip().endswith(':'):
+                # Gemini cut off inside a value — close the string and object
+                raw = raw[:last_quote] + '"truncated"}'
+            else:
+                # Cut off after a value — just close the object
+                raw = raw.rstrip().rstrip(',') + '}'
+            print(f"DESCRIBE: truncated response patched, parsing best-effort")
+
         result = json.loads(raw)
+
+        # Ensure both required fields exist (patching may have lost one)
+        if 'description' not in result:
+            result['description'] = ''
+        if 'short_alt' not in result:
+            result['short_alt'] = ''
         return DescribeResponse(**result)
 
     except json.JSONDecodeError as e:
