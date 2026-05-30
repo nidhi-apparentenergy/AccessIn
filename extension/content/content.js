@@ -326,8 +326,6 @@ window.addEventListener('beforeunload', () => {
     window.speechSynthesis.cancel();
     domObserver.disconnect();
     msgObserver.disconnect();
-    if (badgeObserver) badgeObserver.disconnect();
-    if (badgeAttachInterval) clearInterval(badgeAttachInterval);
 });
 
 // ==========================================
@@ -561,89 +559,22 @@ function dismissToast(toast) {
 
 // Tracks the last seen message to avoid double-firing
 let lastSeenMsgId = null;
-// Cooldown
+// Cooldown — don't fire more than once per second
 let lastFlashTime = 0;
-// Badge count baseline — -1 = not yet initialized (prevents flash on page load)
-let lastMsgBadgeCount = -1;
-let badgeObserver = null;
-let badgeAttachInterval = null;
 
-// Find the messaging badge element in LinkedIn's nav.
-// LinkedIn uses hashed class names that change — so we find it structurally:
-// it's a <span> inside the messaging nav link whose text content is a number.
-function getMessagingBadgeEl() {
-    const msgLink = document.querySelector('a[href*="/messaging/"]');
-    if (!msgLink) return null;
-
-    // Walk all spans inside the messaging link, find the one with just a number
-    const spans = msgLink.querySelectorAll('span');
-    for (const span of spans) {
-        const text = span.textContent?.trim();
-        if (text && /^\d+$/.test(text) && span.children.length === 0) {
-            return span;
-        }
-    }
-    return null;
-}
-
-function parseBadgeCount(el) {
-    if (!el) return 0;
-    const n = parseInt(el.textContent?.trim(), 10);
-    return isNaN(n) ? 0 : n;
-}
-
-// Attach a MutationObserver directly to the badge element.
-// Fires only when badge text changes — no polling, no false positives on load.
-function attachBadgeObserver() {
-    if (badgeObserver) return;
-
-    const badgeEl = getMessagingBadgeEl();
-    if (!badgeEl) return; // not in DOM yet — interval will retry
-
-    // Set baseline WITHOUT flashing — existing unread count won't trigger
-    lastMsgBadgeCount = parseBadgeCount(badgeEl);
-
-    badgeObserver = new MutationObserver(() => {
-        if (!visualAlertsEnabled) return;
-        const current = parseBadgeCount(badgeEl);
-
-        // Flash only when count strictly increases
-        if (lastMsgBadgeCount >= 0 && current > lastMsgBadgeCount) {
-            const now = Date.now();
-            if (now - lastFlashTime >= 3000) {
-                lastFlashTime = now;
-                triggerFlash();
-                showToast('💬 New Message', 'You have ' + current + ' unread message' + (current > 1 ? 's' : ''));
-            }
-        }
-        lastMsgBadgeCount = current;
-    });
-
-    badgeObserver.observe(badgeEl, { characterData: true, childList: true, subtree: true });
-
-    // Stop retrying once attached
-    if (badgeAttachInterval) {
-        clearInterval(badgeAttachInterval);
-        badgeAttachInterval = null;
-    }
-}
-
-// Retry every 2s until badge element appears (LinkedIn renders it async)
-badgeAttachInterval = setInterval(attachBadgeObserver, 2000);
-attachBadgeObserver();
-
-// DOM mutation fallback — for when messaging panel is open
+// All known LinkedIn message node selectors (class-based + data-view-name-based)
+// LinkedIn changes these frequently; we cast a wide net.
 const MSG_NODE_SELECTORS = [
     '.msg-s-event-listitem',
     '.msg-s-message-list__event',
     '.msg-convo-wrapper',
     '[data-view-name="message-list-item"]',
     '[data-view-name*="message-list-item"]',
-    '[class*="msg-s-event-listitem"]',
     '[class*="msg-s-event"]',
     '[class*="msg-s-message-list"]',
 ];
 
+// Outgoing message indicators
 const OUTGOING_SELECTORS = [
     '.msg-s-message-group--outgoing',
     '[data-view-name*="outgoing"]',
@@ -659,9 +590,11 @@ function isOutgoingNode(node) {
 
 function findMessageNode(node) {
     if (!(node instanceof HTMLElement)) return null;
+    // Direct match
     for (const sel of MSG_NODE_SELECTORS) {
         if (node.matches?.(sel)) return node;
     }
+    // Descendant match
     for (const sel of MSG_NODE_SELECTORS) {
         const inner = node.querySelector(sel);
         if (inner) return inner;
@@ -674,10 +607,12 @@ function handleNewMessageNode(node) {
     if (!(node instanceof HTMLElement)) return;
     if (isOutgoingNode(node)) return;
 
+    // Cooldown — max one flash per second
     const now = Date.now();
-    if (now - lastFlashTime < 3000) return;
+    if (now - lastFlashTime < 1000) return;
     lastFlashTime = now;
 
+    // Extract sender name — try several selectors
     const senderEl =
         node.querySelector('.msg-s-message-group__name') ||
         node.querySelector('.msg-s-event-listitem__link') ||
@@ -687,6 +622,7 @@ function handleNewMessageNode(node) {
 
     const sender = senderEl?.innerText?.trim() || 'New message';
 
+    // Extract message preview text
     const bodyEl =
         node.querySelector('.msg-s-event-listitem__body') ||
         node.querySelector('[class*="event-listitem__body"]') ||
@@ -695,18 +631,17 @@ function handleNewMessageNode(node) {
 
     const preview = bodyEl?.innerText?.trim().slice(0, 80) || '';
 
+    // Deduplicate
     const msgId = sender + ':' + preview;
     if (msgId === lastSeenMsgId) return;
     lastSeenMsgId = msgId;
-
-    // Sync badge baseline so badge observer doesn't double-fire
-    lastMsgBadgeCount = parseBadgeCount(getMessagingBadgeEl());
 
     triggerFlash();
     showToast(sender, preview);
 }
 
 // Observe the full document for messaging panel mutations.
+// LinkedIn is a SPA — the messaging panel mounts/unmounts dynamically.
 const msgObserver = new MutationObserver((mutations) => {
     if (!visualAlertsEnabled) return;
     for (const mutation of mutations) {
@@ -718,7 +653,6 @@ const msgObserver = new MutationObserver((mutations) => {
 });
 
 msgObserver.observe(document.body, { childList: true, subtree: true });
-
 
 // ==========================================
 // FEATURE 3: JOB ANALYZER
