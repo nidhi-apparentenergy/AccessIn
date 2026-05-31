@@ -19,6 +19,10 @@
         <section class="section">
             <p class="label">🎯 Session Focus</p>
             <input type="text" id="intentInput" placeholder="e.g. apply to 2 jobs" />
+            <div class="row row-center" style="margin: 4px 0;">
+                <label class="toggle-label" for="intentDuration">⏳ Duration (minutes):</label>
+                <input type="number" id="intentDuration" min="1" max="180" value="30" class="duration-input" />
+            </div>
             <div class="row">
                 <button id="setBtn">Lock in</button>
                 <button id="clearBtn" class="secondary">Clear</button>

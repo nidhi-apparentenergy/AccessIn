@@ -24,23 +24,64 @@ const DEFAULT_SIMPLIFY_PREFS = {
 
 // ── Focus Lock ────────────────────────────────────────────────────────────────
 
+let popupTimerInterval = null;
+
+function updatePopupCountdown() {
+    chrome.storage.local.get(['lockActive', 'lockEndTime', 'intentLock'], (data) => {
+        const statusEl = document.getElementById('status');
+        if (!statusEl) return;
+
+        if (data.lockActive && data.lockEndTime) {
+            const timeLeft = data.lockEndTime - Date.now();
+            if (timeLeft <= 0) {
+                setStatus('status', 'Focus Session Completed! ⏱️');
+                clearInterval(popupTimerInterval);
+                return;
+            }
+
+            const totalSeconds = Math.ceil(timeLeft / 1000);
+            const mins = Math.floor(totalSeconds / 60);
+            const secs = totalSeconds % 60;
+            setStatus('status', `Currently locked in. Time left: ${mins}:${secs.toString().padStart(2, '0')} ⏳`);
+        } else {
+            clearInterval(popupTimerInterval);
+            setStatus('status', data.lockActive ? 'Currently locked in.' : '');
+        }
+    });
+}
+
 document.getElementById('setBtn').addEventListener('click', () => {
     const intent = document.getElementById('intentInput').value.trim();
     if (!intent) return;
-    chrome.storage.local.set({ intentLock: intent, lockActive: true }, () => {
+
+    const durationInput = document.getElementById('intentDuration');
+    const durationMinutes = parseInt(durationInput ? durationInput.value : '30', 10) || 30;
+    const endTime = Date.now() + durationMinutes * 60 * 1000;
+
+    chrome.storage.local.set({ 
+        intentLock: intent, 
+        lockActive: true,
+        lockEndTime: endTime,
+        lockDuration: durationMinutes
+    }, () => {
         chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
             if (!tabs[0]?.id) return;
-            chrome.tabs.sendMessage(tabs[0].id, { type: 'ACTIVATE_LOCK', intent }, () => {
+            chrome.tabs.sendMessage(tabs[0].id, { type: 'ACTIVATE_LOCK', intent, endTime }, () => {
                 // Ignore errors — content script may not be loaded on non-LinkedIn tabs
                 void chrome.runtime.lastError;
             });
         });
+        
         setStatus('status', 'Focus locked!');
+        if (popupTimerInterval) clearInterval(popupTimerInterval);
+        popupTimerInterval = setInterval(updatePopupCountdown, 1000);
+        updatePopupCountdown();
     });
 });
 
 document.getElementById('clearBtn').addEventListener('click', () => {
-    chrome.storage.local.set({ lockActive: false }, () => {
+    chrome.storage.local.set({ lockActive: false, lockEndTime: null }, () => {
+        if (popupTimerInterval) clearInterval(popupTimerInterval);
         chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
             if (!tabs[0]?.id) return;
             chrome.tabs.sendMessage(tabs[0].id, { type: 'DEACTIVATE_LOCK' }, () => {
@@ -51,10 +92,18 @@ document.getElementById('clearBtn').addEventListener('click', () => {
     });
 });
 
-chrome.storage.local.get(['intentLock', 'lockActive'], (data) => {
-    if (data.lockActive && data.intentLock) {
+chrome.storage.local.get(['intentLock', 'lockActive', 'lockEndTime', 'lockDuration'], (data) => {
+    if (data.intentLock) {
         document.getElementById('intentInput').value = data.intentLock;
-        setStatus('status', 'Currently locked in.');
+    }
+    if (data.lockDuration) {
+        const durInput = document.getElementById('intentDuration');
+        if (durInput) durInput.value = data.lockDuration;
+    }
+    if (data.lockActive && data.lockEndTime) {
+        if (popupTimerInterval) clearInterval(popupTimerInterval);
+        popupTimerInterval = setInterval(updatePopupCountdown, 1000);
+        updatePopupCountdown();
     }
 });
 

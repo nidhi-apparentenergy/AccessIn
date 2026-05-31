@@ -16,10 +16,12 @@ function escapeHTML(str) {
 // FEATURE 1: INTENT LOCK & BANNER LOGIC
 // ==========================================
 
+let bannerTimerInterval = null;
+
 function injectBanner(intent) {
     if (document.getElementById('accessplus-banner')) return;
 
-    chrome.storage.local.get(['savedJobs'], (data) => {
+    chrome.storage.local.get(['savedJobs', 'lockEndTime', 'lockActive'], (data) => {
         const jobs = data.savedJobs || [];
         const banner = document.createElement('div');
         banner.id = 'accessplus-banner';
@@ -41,6 +43,64 @@ function injectBanner(intent) {
         focusLabel.appendChild(document.createTextNode('🎯 Focus: '));
         focusLabel.appendChild(strong);
         focusSpan.appendChild(focusLabel);
+
+        // Countdown Timer Badge
+        let timerBadge = null;
+        if (data.lockActive && data.lockEndTime) {
+            timerBadge = document.createElement('span');
+            timerBadge.id = 'accessplus-timer-badge';
+            timerBadge.style.cssText = `
+                font-size: 11.5px;
+                background: rgba(255, 255, 255, 0.25);
+                padding: 3px 10px;
+                border-radius: 12px;
+                display: inline-flex;
+                align-items: center;
+                gap: 4px;
+                font-weight: 700;
+                transition: all 0.3s;
+            `;
+            focusSpan.appendChild(timerBadge);
+
+            if (bannerTimerInterval) clearInterval(bannerTimerInterval);
+
+            const triggerVisualAlertSequence = () => {
+                let flashCount = 0;
+                const flashInterval = setInterval(() => {
+                    triggerFlash();
+                    flashCount++;
+                    if (flashCount >= 3) {
+                        clearInterval(flashInterval);
+                    }
+                }, 1000);
+            };
+
+            const updateBannerTimer = () => {
+                chrome.storage.local.get(['lockEndTime', 'lockActive'], (res) => {
+                    if (!res.lockActive || !res.lockEndTime) {
+                        if (bannerTimerInterval) clearInterval(bannerTimerInterval);
+                        return;
+                    }
+
+                    const timeLeft = res.lockEndTime - Date.now();
+                    if (timeLeft <= 0) {
+                        if (bannerTimerInterval) clearInterval(bannerTimerInterval);
+                        timerBadge.textContent = '⚠️ Focus Session Completed!';
+                        timerBadge.style.background = '#e74c3c'; // visual error-red warning
+                        triggerVisualAlertSequence();
+                        return;
+                    }
+
+                    const totalSeconds = Math.ceil(timeLeft / 1000);
+                    const mins = Math.floor(totalSeconds / 60);
+                    const secs = totalSeconds % 60;
+                    timerBadge.textContent = `⏱️ ${mins}:${secs.toString().padStart(2, '0')}`;
+                });
+            };
+
+            updateBannerTimer();
+            bannerTimerInterval = setInterval(updateBannerTimer, 1000);
+        }
 
         // Saved Jobs Focus Suggestion inside the banner
         if (jobs.length > 0) {
@@ -79,7 +139,11 @@ function injectBanner(intent) {
         hideFeed();
 
         doneBtn.addEventListener('click', () => {
-            chrome.storage.local.set({ lockActive: false });
+            if (bannerTimerInterval) {
+                clearInterval(bannerTimerInterval);
+                bannerTimerInterval = null;
+            }
+            chrome.storage.local.set({ lockActive: false, lockEndTime: null });
             removeBanner();
         });
     });
@@ -94,6 +158,10 @@ function hideFeed() {
 }
 
 function removeBanner() {
+    if (bannerTimerInterval) {
+        clearInterval(bannerTimerInterval);
+        bannerTimerInterval = null;
+    }
     const banner = document.getElementById('accessplus-banner');
     if (banner) banner.remove();
     document.body.style.marginTop = '';
@@ -608,8 +676,11 @@ const MSG_NODE_SELECTORS = [
 // Outgoing message indicators
 const OUTGOING_SELECTORS = [
     '.msg-s-message-group--outgoing',
+    '.msg-s-message-group--self',
     '[data-view-name*="outgoing"]',
+    '[data-view-name*="self"]',
     '[class*="outgoing"]',
+    '[class*="--self"]'
 ];
 
 function isOutgoingNode(node) {
@@ -678,7 +749,14 @@ const msgObserver = new MutationObserver((mutations) => {
     for (const mutation of mutations) {
         for (const node of mutation.addedNodes) {
             const msgNode = findMessageNode(node);
-            if (msgNode) handleNewMessageNode(msgNode);
+            if (msgNode) {
+                // Wait 150ms for LinkedIn SPA to populate text and classes (optimistic rendering delay)
+                setTimeout(() => {
+                    if (msgNode.isConnected) {
+                        handleNewMessageNode(msgNode);
+                    }
+                }, 150);
+            }
         }
     }
 });
@@ -1991,6 +2069,7 @@ chrome.storage.local.get(['simplifyPrefs'], (data) => {
 });
 
 injectTTSButton();
+injectShortcutsButton();
 startSensoryBadgeObserver();
 
 window.setTimeout(() => {
@@ -2885,3 +2964,451 @@ startInlineButtonScan();
 
 // Show reminder toast shortly after page load
 setTimeout(checkAndShowReminders, 2500);
+
+// ==========================================
+// FEATURE: KEYBOARD SHORTCUTS PANEL
+// ==========================================
+
+function ensureShortcutsStyles() {
+    if (document.getElementById('accessplus-shortcuts-styles')) return;
+
+    const style = document.createElement('style');
+    style.id = 'accessplus-shortcuts-styles';
+    style.textContent = `
+        /* Floating shortcuts button */
+        #accessplus-shortcuts-btn {
+            position: fixed;
+            bottom: 20px;
+            right: 175px;
+            z-index: 999999;
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            background-color: #ffffff;
+            border: 2px solid #0a66c2;
+            color: #0a66c2;
+            cursor: pointer;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-weight: bold;
+            font-size: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            outline: none;
+            box-sizing: border-box;
+            padding: 0;
+        }
+
+        #accessplus-shortcuts-btn:hover {
+            background-color: #0a66c2;
+            color: #ffffff;
+            transform: translateY(-2px) scale(1.05);
+            box-shadow: 0 6px 14px rgba(0,0,0,0.2);
+        }
+
+        #accessplus-shortcuts-btn:active {
+            transform: translateY(0) scale(0.95);
+        }
+
+        #accessplus-shortcuts-btn:focus {
+            outline: 3px solid #004182;
+            outline-offset: 2px;
+        }
+
+        /* Shortcuts dialog wrapper */
+        #accessplus-shortcuts-dialog {
+            border: none;
+            border-radius: 16px;
+            padding: 0;
+            max-width: 520px;
+            width: 90%;
+            background: rgba(255, 255, 255, 0.98);
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.1);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            color: #1e293b;
+            overflow: hidden;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 2147483647;
+            
+            /* Entry/exit discrete animation properties */
+            opacity: 0;
+            transform: translate(-50%, -45%) scale(0.95);
+            transition-property: opacity, transform, display, overlay;
+            transition-duration: 0.25s;
+            transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+            transition-behavior: allow-discrete;
+        }
+
+        #accessplus-shortcuts-dialog[open] {
+            opacity: 1;
+            transform: translate(-50%, -50%) scale(1);
+        }
+        
+        #accessplus-shortcuts-dialog[open] {
+            @starting-style {
+                opacity: 0;
+                transform: translate(-50%, -45%) scale(0.95);
+            }
+        }
+
+        /* Glassmorphic backdrop filter */
+        #accessplus-shortcuts-dialog::backdrop {
+            background-color: rgba(15, 23, 42, 0);
+            backdrop-filter: blur(0px);
+            -webkit-backdrop-filter: blur(0px);
+            transition:
+                display 0.25s allow-discrete,
+                overlay 0.25s allow-discrete,
+                background-color 0.25s ease-out,
+                backdrop-filter 0.25s ease-out,
+                -webkit-backdrop-filter 0.25s ease-out;
+        }
+
+        #accessplus-shortcuts-dialog[open]::backdrop {
+            background-color: rgba(15, 23, 42, 0.45);
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+        }
+        
+        #accessplus-shortcuts-dialog[open]::backdrop {
+            @starting-style {
+                background-color: rgba(15, 23, 42, 0);
+                backdrop-filter: blur(0px);
+                -webkit-backdrop-filter: blur(0px);
+            }
+        }
+
+        .accessplus-shortcuts-container {
+            display: flex;
+            flex-direction: column;
+            max-height: 85vh;
+            box-sizing: border-box;
+        }
+
+        .accessplus-shortcuts-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 18px 24px;
+            background: #0a66c2;
+            color: white;
+            box-sizing: border-box;
+        }
+
+        .accessplus-shortcuts-header h2 {
+            margin: 0;
+            font-size: 18px;
+            font-weight: 700;
+            letter-spacing: -0.01em;
+            color: white;
+        }
+
+        .accessplus-shortcuts-close {
+            background: rgba(255, 255, 255, 0.15);
+            border: none;
+            color: white;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+            box-sizing: border-box;
+            padding: 0;
+        }
+
+        .accessplus-shortcuts-close:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: scale(1.05);
+        }
+
+        .accessplus-shortcuts-close:focus {
+            outline: 2px solid white;
+            outline-offset: 2px;
+        }
+
+        .accessplus-shortcuts-content {
+            padding: 20px 24px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            max-height: calc(85vh - 120px);
+            box-sizing: border-box;
+        }
+
+        .accessplus-shortcuts-group {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 14px 18px;
+            box-sizing: border-box;
+        }
+
+        .accessplus-shortcuts-group h3 {
+            margin-top: 0;
+            margin-bottom: 12px;
+            font-size: 13.5px;
+            font-weight: 800;
+            color: #0a66c2;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .accessplus-shortcuts-group dl {
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            box-sizing: border-box;
+        }
+
+        .shortcut-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px dashed #e2e8f0;
+            padding-bottom: 8px;
+            box-sizing: border-box;
+        }
+
+        .shortcut-row:last-child {
+            border-bottom: none;
+            padding-bottom: 0;
+        }
+
+        .shortcut-row dt {
+            font-weight: 500;
+            box-sizing: border-box;
+        }
+
+        .shortcut-row dd {
+            margin: 0;
+            font-size: 12px;
+            color: #475569;
+            text-align: right;
+            max-width: 60%;
+            box-sizing: border-box;
+        }
+
+        /* Styled keycaps */
+        kbd {
+            background-color: #ffffff;
+            border: 1.5px solid #cbd5e1;
+            border-bottom: 3px solid #94a3b8;
+            border-radius: 5px;
+            color: #0f172a;
+            display: inline-block;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 11px;
+            font-weight: 700;
+            line-height: 1;
+            padding: 3px 6px;
+            white-space: nowrap;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+            box-sizing: border-box;
+        }
+
+        .accessplus-shortcuts-footer {
+            padding: 12px 24px;
+            background: #f1f5f9;
+            border-top: 1px solid #e2e8f0;
+            text-align: center;
+            box-sizing: border-box;
+        }
+
+        .accessplus-shortcuts-footer p {
+            margin: 0;
+            font-size: 11px;
+            color: #64748b;
+            font-weight: 500;
+        }
+
+        /* Reduced motion preference */
+        @media (prefers-reduced-motion: reduce) {
+            #accessplus-shortcuts-dialog {
+                transform: translate(-50%, -50%) !important;
+                transition-duration: 0.1s !important;
+            }
+            #accessplus-shortcuts-dialog[open] {
+                @starting-style {
+                    transform: translate(-50%, -50%) !important;
+                }
+            }
+            #accessplus-shortcuts-dialog::backdrop,
+            #accessplus-shortcuts-dialog[open]::backdrop {
+                transition-duration: 0.1s !important;
+                backdrop-filter: none !important;
+                -webkit-backdrop-filter: none !important;
+            }
+        }
+    `;
+    document.head.appendChild(style);
+}
+
+function injectShortcutsButton() {
+    if (document.getElementById('accessplus-shortcuts-btn')) return;
+
+    ensureShortcutsStyles();
+
+    // 1. Create floating button
+    const shortcutsBtn = document.createElement('button');
+    shortcutsBtn.id = 'accessplus-shortcuts-btn';
+    shortcutsBtn.textContent = '?';
+    shortcutsBtn.setAttribute('aria-label', 'Show keyboard shortcuts');
+    shortcutsBtn.setAttribute('title', 'Show keyboard shortcuts (Alt+?) or (?)');
+    
+    // Ensure standard tab navigation
+    shortcutsBtn.tabIndex = 0;
+
+    // 2. Create dialog element
+    const dialog = document.createElement('dialog');
+    dialog.id = 'accessplus-shortcuts-dialog';
+    dialog.setAttribute('aria-labelledby', 'accessplus-shortcuts-title');
+    dialog.setAttribute('role', 'dialog');
+
+    dialog.innerHTML = `
+        <div class="accessplus-shortcuts-container">
+            <header class="accessplus-shortcuts-header">
+                <h2 id="accessplus-shortcuts-title">⌨️ Keyboard Shortcuts</h2>
+                <button class="accessplus-shortcuts-close" aria-label="Close keyboard shortcuts dialog">✕</button>
+            </header>
+            <div class="accessplus-shortcuts-content">
+                <section class="accessplus-shortcuts-group">
+                    <h3>🔊 Read Aloud (Alt Key)</h3>
+                    <dl>
+                        <div class="shortcut-row">
+                            <dt><kbd>Alt</kbd> + <kbd>↑ / ↓</kbd></dt>
+                            <dd>Navigate to previous / next text item</dd>
+                        </div>
+                        <div class="shortcut-row">
+                            <dt><kbd>Alt</kbd> + <kbd>← / →</kbd></dt>
+                            <dd>Navigate text items horizontally</dd>
+                        </div>
+                        <div class="shortcut-row">
+                            <dt><kbd>Alt</kbd> + <kbd>S</kbd></dt>
+                            <dd>Stop reading aloud</dd>
+                        </div>
+                        <div class="shortcut-row">
+                            <dt><kbd>Alt</kbd> + <kbd>+</kbd> / <kbd>-</kbd></dt>
+                            <dd>Increase / decrease speech speed</dd>
+                        </div>
+                    </dl>
+                </section>
+                
+                <section class="accessplus-shortcuts-group">
+                    <h3>🖼️ Image Describer (Ctrl Key)</h3>
+                    <dl>
+                        <div class="shortcut-row">
+                            <dt><kbd>Ctrl</kbd> + <kbd>D</kbd></dt>
+                            <dd>Describe focused / visible image</dd>
+                        </div>
+                        <div class="shortcut-row">
+                            <dt><kbd>Ctrl</kbd> + <kbd>S</kbd></dt>
+                            <dd>Stop speech & close description panel</dd>
+                        </div>
+                        <div class="shortcut-row">
+                            <dt><kbd>Tab</kbd> / <kbd>Shift</kbd> + <kbd>Tab</kbd></dt>
+                            <dd>Move focus between images on the page</dd>
+                        </div>
+                        <div class="shortcut-row">
+                            <dt><kbd>Ctrl</kbd> + <kbd>← / →</kbd></dt>
+                            <dd>Cycle focus between images manually</dd>
+                        </div>
+                        <div class="shortcut-row">
+                            <dt><kbd>Ctrl</kbd> + <kbd>↑ / ↓</kbd></dt>
+                            <dd>Scroll feed container up / down</dd>
+                        </div>
+                    </dl>
+                </section>
+                
+                <section class="accessplus-shortcuts-group">
+                    <h3>ℹ️ General Shortcuts</h3>
+                    <dl>
+                        <div class="shortcut-row">
+                            <dt><kbd>?</kbd> or <kbd>Alt</kbd> + <kbd>?</kbd></dt>
+                            <dd>Toggle this keyboard shortcuts panel</dd>
+                        </div>
+                    </dl>
+                </section>
+            </div>
+            <footer class="accessplus-shortcuts-footer">
+                <p>Designed for blind and deaf accessibility. Press <kbd>Esc</kbd> to close.</p>
+            </footer>
+        </div>
+    `;
+
+    document.body.appendChild(shortcutsBtn);
+    document.body.appendChild(dialog);
+
+    // Bind event handlers
+    const openDialog = () => {
+        dialog.showModal();
+        const closeBtn = dialog.querySelector('.accessplus-shortcuts-close');
+        if (closeBtn) closeBtn.focus();
+    };
+
+    const closeDialog = () => {
+        dialog.close();
+        shortcutsBtn.focus();
+    };
+
+    shortcutsBtn.addEventListener('click', openDialog);
+
+    dialog.querySelector('.accessplus-shortcuts-close').addEventListener('click', closeDialog);
+
+    // Close on clicking backdrop
+    dialog.addEventListener('click', (e) => {
+        if (e.target === dialog) {
+            closeDialog();
+        }
+    });
+
+    // Close clean-up handler to restore focus properly on native cancel (Esc key)
+    dialog.addEventListener('cancel', (e) => {
+        setTimeout(() => {
+            shortcutsBtn.focus();
+        }, 50);
+    });
+}
+
+// Global key listener to toggle the shortcuts panel with Alt+? or ?
+document.addEventListener('keydown', (e) => {
+    const isShortcutKey = (e.key === '?') || (e.altKey && e.key === '?');
+    if (!isShortcutKey) return;
+
+    // Check if the user is currently typing in an input element
+    const activeEl = document.activeElement;
+    if (activeEl && (
+        activeEl.tagName === 'INPUT' || 
+        activeEl.tagName === 'TEXTAREA' || 
+        activeEl.isContentEditable ||
+        activeEl.getAttribute('role') === 'textbox'
+    )) {
+        return;
+    }
+
+    e.preventDefault();
+
+    const dialog = document.getElementById('accessplus-shortcuts-dialog');
+    const shortcutsBtn = document.getElementById('accessplus-shortcuts-btn');
+    if (dialog && shortcutsBtn) {
+        if (dialog.open) {
+            dialog.close();
+            shortcutsBtn.focus();
+        } else {
+            dialog.showModal();
+            const closeBtn = dialog.querySelector('.accessplus-shortcuts-close');
+            if (closeBtn) closeBtn.focus();
+        }
+    }
+});
