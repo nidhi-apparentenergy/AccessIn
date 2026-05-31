@@ -326,6 +326,7 @@ window.addEventListener('beforeunload', () => {
     window.speechSynthesis.cancel();
     domObserver.disconnect();
     msgObserver.disconnect();
+    if (sensoryBadgeObserver) sensoryBadgeObserver.disconnect();
 });
 
 // ==========================================
@@ -655,7 +656,338 @@ const msgObserver = new MutationObserver((mutations) => {
 msgObserver.observe(document.body, { childList: true, subtree: true });
 
 // ==========================================
-// FEATURE 3: JOB ANALYZER
+// FEATURE 3: QUICK SENSORY LOAD BADGES
+// Adds green/yellow/red dots to LinkedIn job cards using local heuristics.
+// ==========================================
+
+const SENSORY_JARGON_TERMS = [
+    'fast-paced', 'high-energy', 'dynamic environment', 'work hard play hard',
+    'hit the ground running', 'wear many hats', 'rockstar', 'ninja', 'guru',
+    'self-starter', 'multitask', 'context-switch', 'under pressure',
+    'tight deadlines', 'always-on', 'urgent', 'hustle', 'culture fit',
+    'excellent verbal communication', 'outgoing', 'travel required',
+    'on-call', 'stakeholders', 'cross-functional', 'deliverables',
+    'kpis', 'okr', 'synergy', 'leverage', 'ownership', 'ambiguous',
+    'thrive', 'competitive environment'
+];
+
+let sensoryBadgeObserver = null;
+
+function ensureSensoryBadgeStyles() {
+    if (document.getElementById('accessin-sensory-badge-styles')) return;
+
+    const style = document.createElement('style');
+    style.id = 'accessin-sensory-badge-styles';
+    style.textContent = `
+        .accessin-sensory-badge {
+            min-width: 74px;
+            height: 34px;
+            padding: 0 11px;
+            border-radius: 999px;
+            border: 2px solid #111827;
+            box-shadow: 0 7px 18px rgba(0,0,0,0.24);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex: 0 0 auto;
+            margin-left: 6px;
+            vertical-align: middle;
+            cursor: help;
+            color: #111827;
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            font-size: 13px;
+            font-weight: 900;
+            line-height: 1;
+            text-shadow: none;
+            letter-spacing: 0.02em;
+        }
+
+        .accessin-sensory-badge-wrap {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            z-index: 999998;
+        }
+
+        .accessin-sensory-badge-wrap.accessin-sensory-overlay {
+            position: fixed;
+            pointer-events: auto;
+        }
+
+        .accessin-sensory-legend {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin: 10px 16px 6px;
+            padding: 8px 10px;
+            border: 1px solid #dbe7f3;
+            border-radius: 8px;
+            background: #f7fbff;
+            color: #334155;
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            font-size: 12px;
+            line-height: 1.3;
+            box-sizing: border-box;
+        }
+
+        .accessin-sensory-legend strong {
+            color: #0a66c2;
+            font-size: 12px;
+        }
+
+        .accessin-sensory-legend-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            white-space: nowrap;
+        }
+
+        .accessin-sensory-legend-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 999px;
+            display: inline-block;
+        }
+
+        .accessin-sensory-badge-label {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
+    `;
+    document.head.appendChild(style);
+}
+
+function normalizeSensoryText(text) {
+    return String(text || '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+}
+
+function estimateSensoryLoad(text) {
+    const normalized = normalizeSensoryText(text);
+    const words = normalized.match(/[a-z][a-z0-9+#.-]*/g) || [];
+    const wordCount = words.length;
+
+    const jargonHits = SENSORY_JARGON_TERMS.filter(term => normalized.includes(term));
+    const jargonDensity = wordCount ? jargonHits.length / wordCount : 0;
+
+    let score = 1;
+    if (wordCount > 30) score += 1;
+    if (wordCount > 60) score += 1;
+    if (wordCount > 110) score += 1;
+    if (jargonHits.length >= 1) score += 1;
+    if (jargonHits.length >= 3) score += 1;
+    if (jargonDensity > 0.035) score += 1;
+    if (/over\s+\d+\s+applicants|promoted by hirer|actively reviewing/i.test(normalized)) score += 1;
+    if (/internship|intern\b|contract|temporary/i.test(normalized)) score += 1;
+    if (/hybrid|on-site|onsite|travel|required|applicants/i.test(normalized)) score += 1;
+    if (/[;:]{2,}|\/{2,}/.test(normalized)) score += 1;
+
+    if (score <= 3) {
+        return {
+            level: 'Low',
+            color: '#27ae60',
+            description: 'Low sensory load estimate',
+            wordCount,
+            jargonHits,
+        };
+    }
+
+    if (score <= 5) {
+        return {
+            level: 'Medium',
+            color: '#f1c40f',
+            description: 'Medium sensory load estimate',
+            wordCount,
+            jargonHits,
+        };
+    }
+
+    return {
+        level: 'High',
+        color: '#e74c3c',
+        description: 'High sensory load estimate',
+        wordCount,
+        jargonHits,
+    };
+}
+
+function findLinkedInJobRows() {
+    const jobLinks = Array.from(document.querySelectorAll('a[href*="/jobs/view"]'))
+        .filter(link => {
+            const rect = link.getBoundingClientRect();
+            return rect.width > 0 &&
+                rect.height > 0 &&
+                rect.left < window.innerWidth * 0.55 &&
+                rect.top > 90 &&
+                rect.bottom < window.innerHeight - 10 &&
+                (link.innerText?.trim() || '').length > 2;
+        });
+
+    const rows = jobLinks
+        .map(link => {
+            const card = findBestJobCardContainer(link);
+            if (!card) return null;
+
+            const rect = card.getBoundingClientRect();
+            const text = card.innerText?.trim() || link.innerText?.trim() || '';
+            if (rect.width < 260 || rect.height < 50 || text.length < 10) return null;
+
+            return {
+                card,
+                link,
+                text,
+                top: rect.top,
+                right: rect.right,
+                height: rect.height,
+                rowKey: Math.round(rect.top / 35),
+            };
+        })
+        .filter(Boolean)
+        .filter(row => !row.card.closest('#accessin-analysis-panel'));
+
+    const byRow = new Map();
+    rows.forEach(row => {
+        const existing = byRow.get(row.rowKey);
+        if (!existing || row.text.length > existing.text.length) {
+            byRow.set(row.rowKey, row);
+        }
+    });
+
+    return Array.from(byRow.values());
+}
+
+function findBestJobCardContainer(link) {
+    const candidates = [];
+    let node = link;
+
+    for (let i = 0; i < 10 && node; i++) {
+        if (node instanceof HTMLElement) {
+            const rect = node.getBoundingClientRect();
+            const text = node.innerText?.trim() || '';
+            const hasJobSignal = /easy apply|actively reviewing|viewed|saved|on-site|remote|hybrid|applicants|intern|engineer|developer|analyst|researcher|manager/i.test(text);
+
+            if (rect.width >= 360 &&
+                rect.width <= 780 &&
+                rect.height >= 85 &&
+                rect.height <= 230 &&
+                rect.left < window.innerWidth * 0.55 &&
+                text.length >= 30 &&
+                hasJobSignal) {
+                candidates.push(node);
+            }
+        }
+        node = node.parentElement;
+    }
+
+    return candidates.sort((a, b) => {
+        const ar = a.getBoundingClientRect();
+        const br = b.getBoundingClientRect();
+        return (br.width * br.height) - (ar.width * ar.height);
+    })[0] || link.closest('li, .scaffold-layout__list-item, .job-card-container');
+}
+
+function addSensoryBadgeToRow(row) {
+    const text = row.text || '';
+    if (text.length < 20) return;
+
+    const estimate = estimateSensoryLoad(text);
+
+    const badge = document.createElement('span');
+    badge.className = 'accessin-sensory-badge';
+    badge.style.backgroundColor = estimate.color;
+    badge.textContent = estimate.level.charAt(0);
+
+    const jargonText = estimate.jargonHits.length
+        ? ` Jargon flags: ${estimate.jargonHits.slice(0, 4).join(', ')}.`
+        : ' No major jargon flags found.';
+    badge.title = `${estimate.description}. ${estimate.wordCount} words.${jargonText}`;
+    badge.setAttribute('aria-label', `${estimate.level} sensory load estimate`);
+
+    const hiddenLabel = document.createElement('span');
+    hiddenLabel.className = 'accessin-sensory-badge-label';
+    hiddenLabel.textContent = `${estimate.level} sensory load`;
+
+    const wrapper = document.createElement('span');
+    wrapper.className = 'accessin-sensory-badge-wrap accessin-sensory-overlay';
+    wrapper.appendChild(badge);
+    wrapper.appendChild(hiddenLabel);
+
+    wrapper.title = badge.title;
+    Object.assign(wrapper.style, {
+        top: `${Math.max(96, row.top + 14)}px`,
+        left: `${Math.max(0, row.right - 132)}px`,
+    });
+
+    document.body.appendChild(wrapper);
+}
+
+function injectSensoryLegend() {
+    if (!window.location.href.includes('/jobs')) return;
+    if (document.getElementById('accessin-sensory-legend')) return;
+
+    const jobList = document.querySelector('.scaffold-layout__list, .jobs-search-results-list, [class*="jobs-search-results"]');
+    const anchor = jobList || document.querySelector('main');
+    if (!anchor) return;
+
+    const legend = document.createElement('div');
+    legend.id = 'accessin-sensory-legend';
+    legend.className = 'accessin-sensory-legend';
+    legend.innerHTML = `
+        <strong>Sensory load</strong>
+        <span class="accessin-sensory-legend-item"><span class="accessin-sensory-legend-dot" style="background:#27ae60"></span>Low</span>
+        <span class="accessin-sensory-legend-item"><span class="accessin-sensory-legend-dot" style="background:#f1c40f"></span>Medium</span>
+        <span class="accessin-sensory-legend-item"><span class="accessin-sensory-legend-dot" style="background:#e74c3c"></span>High</span>
+    `;
+    anchor.prepend(legend);
+}
+
+function scanJobCardsForSensoryBadges() {
+    ensureSensoryBadgeStyles();
+    injectSensoryLegend();
+    clearSensoryBadges();
+    const rows = findLinkedInJobRows();
+    rows.forEach(addSensoryBadgeToRow);
+}
+
+function clearSensoryBadges() {
+    document.querySelectorAll('.accessin-sensory-badge-wrap').forEach(el => el.remove());
+    document.querySelectorAll('[data-accessin-sensory-badge]').forEach(el => {
+        delete el.dataset.accessinSensoryBadge;
+    });
+}
+
+function startSensoryBadgeObserver() {
+    clearSensoryBadges();
+    scanJobCardsForSensoryBadges();
+
+    if (sensoryBadgeObserver) return;
+    sensoryBadgeObserver = new MutationObserver(() => {
+        window.clearTimeout(startSensoryBadgeObserver.scanTimer);
+        startSensoryBadgeObserver.scanTimer = window.setTimeout(scanJobCardsForSensoryBadges, 400);
+    });
+    sensoryBadgeObserver.observe(document.body, { childList: true, subtree: true });
+    window.setInterval(scanJobCardsForSensoryBadges, 2000);
+}
+
+window.setTimeout(() => {
+    try {
+        startSensoryBadgeObserver();
+    } catch (error) {
+        console.error('[AccessIn] Sensory badge startup failed:', error);
+    }
+}, 1000);
+
+// ==========================================
+// FEATURE 4: JOB ANALYZER
 // ==========================================
 
 function extractJobDescription() {
@@ -1455,6 +1787,7 @@ chrome.storage.local.get(['simplifyPrefs'], (data) => {
 });
 
 injectTTSButton();
+startSensoryBadgeObserver();
 
 window.setTimeout(() => {
     chrome.storage.local.get(['simplifyPrefs'], (data) => {
