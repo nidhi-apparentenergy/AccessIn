@@ -12,6 +12,49 @@ function escapeHTML(str) {
     return div.innerHTML;
 }
 
+/**
+ * Returns true if the Chrome extension context is still alive.
+ * After an extension reload/update, content scripts become orphaned —
+ * any call to chrome.runtime / chrome.storage throws
+ * "Extension context invalidated". This guard silently swallows that.
+ */
+function isExtensionContextValid() {
+    try {
+        // chrome.runtime.id is undefined when the context is gone
+        return !!chrome?.runtime?.id;
+    } catch (_) {
+        return false;
+    }
+}
+
+/**
+ * Safe wrapper for chrome.storage.local.get.
+ * Silently no-ops when the extension context has been invalidated.
+ */
+function safeStorageGet(keys, callback) {
+    if (!isExtensionContextValid()) return;
+    try {
+        chrome.storage.local.get(keys, (data) => {
+            if (chrome.runtime.lastError) return; // suppress benign errors
+            callback(data);
+        });
+    } catch (_) { /* extension context invalidated — ignore */ }
+}
+
+/**
+ * Safe wrapper for chrome.storage.local.set.
+ * Silently no-ops when the extension context has been invalidated.
+ */
+function safeStorageSet(items, callback) {
+    if (!isExtensionContextValid()) return;
+    try {
+        chrome.storage.local.set(items, () => {
+            if (chrome.runtime.lastError) return;
+            if (callback) callback();
+        });
+    } catch (_) { /* extension context invalidated — ignore */ }
+}
+
 // ==========================================
 // FEATURE 1: INTENT LOCK & BANNER LOGIC
 // ==========================================
@@ -21,7 +64,7 @@ let bannerTimerInterval = null;
 function injectBanner(intent) {
     if (document.getElementById('accessplus-banner')) return;
 
-    chrome.storage.local.get(['savedJobs', 'lockEndTime', 'lockActive'], (data) => {
+    safeStorageGet(['savedJobs', 'lockEndTime', 'lockActive'], (data) => {
         const jobs = data.savedJobs || [];
         const banner = document.createElement('div');
         banner.id = 'accessplus-banner';
@@ -76,7 +119,7 @@ function injectBanner(intent) {
             };
 
             const updateBannerTimer = () => {
-                chrome.storage.local.get(['lockEndTime', 'lockActive'], (res) => {
+                safeStorageGet(['lockEndTime', 'lockActive'], (res) => {
                     if (!res.lockActive || !res.lockEndTime) {
                         if (bannerTimerInterval) clearInterval(bannerTimerInterval);
                         return;
@@ -143,7 +186,7 @@ function injectBanner(intent) {
                 clearInterval(bannerTimerInterval);
                 bannerTimerInterval = null;
             }
-            chrome.storage.local.set({ lockActive: false, lockEndTime: null });
+            safeStorageSet({ lockActive: false, lockEndTime: null });
             removeBanner();
         });
     });
@@ -531,7 +574,7 @@ let toastQueue = [];              // active toast elements
 const MAX_TOASTS = 3;
 
 // Load persisted prefs
-chrome.storage.local.get(['visualAlertsEnabled', 'alertColor'], (prefs) => {
+safeStorageGet(['visualAlertsEnabled', 'alertColor'], (prefs) => {
     if (typeof prefs.visualAlertsEnabled === 'boolean') {
         visualAlertsEnabled = prefs.visualAlertsEnabled;
     }
@@ -539,14 +582,16 @@ chrome.storage.local.get(['visualAlertsEnabled', 'alertColor'], (prefs) => {
 });
 
 // Keep prefs in sync if the user changes them while the tab is open
-chrome.storage.onChanged.addListener((changes) => {
-    if (changes.visualAlertsEnabled) {
-        visualAlertsEnabled = changes.visualAlertsEnabled.newValue;
-    }
-    if (changes.alertColor) {
-        alertColor = changes.alertColor.newValue;
-    }
-});
+try {
+    chrome.storage.onChanged.addListener((changes) => {
+        if (changes.visualAlertsEnabled) {
+            visualAlertsEnabled = changes.visualAlertsEnabled.newValue;
+        }
+        if (changes.alertColor) {
+            alertColor = changes.alertColor.newValue;
+        }
+    });
+} catch (_) { /* extension context invalidated */ }
 
 // ── Flash overlay ─────────────────────────────────────────────────────────────
 function triggerFlash() {
@@ -1209,7 +1254,7 @@ function injectAnalysisPanel(data) {
         .map(t => `<li>${escapeHTML(t)}</li>`).join('');
 
     // Fetch local storage to check if this job is already saved
-    chrome.storage.local.get(['savedJobs'], (res) => {
+    safeStorageGet(['savedJobs'], (res) => {
         const savedJobs = res.savedJobs || [];
         const existingJob = savedJobs.find(j => j.title === data.title && j.company === data.company);
         
@@ -1445,7 +1490,7 @@ function injectAnalysisPanel(data) {
         const statusText = document.getElementById('ain-panel-save-status');
 
         function performSave(notesText) {
-            chrome.storage.local.get(['savedJobs'], (saveRes) => {
+            safeStorageGet(['savedJobs'], (saveRes) => {
                 const sJobs = saveRes.savedJobs || [];
                 const existingIdx = sJobs.findIndex(j => j.title === data.title && j.company === data.company);
 
@@ -1471,7 +1516,7 @@ function injectAnalysisPanel(data) {
                     sJobs.push(newJob);
                 }
 
-                chrome.storage.local.set({ savedJobs: sJobs }, () => {
+                safeStorageSet({ savedJobs: sJobs }, () => {
                     if (saveBtn) {
                         saveBtn.textContent = 'Saved ✓';
                         saveBtn.style.background = '#27ae60';
@@ -1496,51 +1541,53 @@ function injectAnalysisPanel(data) {
     });
 }
 
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-    if (msg.type === 'GET_JOB_DESCRIPTION') {
-        sendResponse({ jd: extractJobDescription() });
-        return true;
-    }
-    if (msg.type === 'INJECT_ANALYSIS') {
-        injectAnalysisPanel(msg.data);
-        sendResponse({ ok: true });
-        return true;
-    }
-    if (msg.type === 'GET_PROFILE_CONTENT') {
-        sendResponse({ profile: extractProfileContent() });
-        return true;
-    }
-    if (msg.type === 'INJECT_PROFILE_SCORE') {
-        injectProfileScorePanel(msg.data);
-        sendResponse({ ok: true });
-        return true;
-    }
-    if (msg.type === 'APPLY_READING_PREFS') {
-        applyReadingPrefs(msg.prefs);
-        sendResponse({ ok: true });
-        return true;
-    }
-    if (msg.type === 'APPLY_SIMPLIFY_PREFS') {
-        applySimplifyPrefs(msg.prefs);
-        sendResponse({ ok: true });
-        return true;
-    }
-    if (msg.type === 'ACTIVATE_LOCK') injectBanner(msg.intent);
-    if (msg.type === 'DEACTIVATE_LOCK') removeBanner();
-    if (msg.type === 'SET_VISUAL_ALERTS') {
-        visualAlertsEnabled = msg.enabled;
-        sendResponse({ ok: true });
-    }
-    if (msg.type === 'SET_ALERT_COLOR') {
-        alertColor = msg.color;
-        sendResponse({ ok: true });
-    }
-    if (msg.type === 'TEST_FLASH') {
-        triggerFlash();
-        showToast('Test', 'Flash is working! 🎉');
-        sendResponse({ ok: true });
-    }
-});
+try {
+    chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+        if (msg.type === 'GET_JOB_DESCRIPTION') {
+            sendResponse({ jd: extractJobDescription() });
+            return true;
+        }
+        if (msg.type === 'INJECT_ANALYSIS') {
+            injectAnalysisPanel(msg.data);
+            sendResponse({ ok: true });
+            return true;
+        }
+        if (msg.type === 'GET_PROFILE_CONTENT') {
+            sendResponse({ profile: extractProfileContent() });
+            return true;
+        }
+        if (msg.type === 'INJECT_PROFILE_SCORE') {
+            injectProfileScorePanel(msg.data);
+            sendResponse({ ok: true });
+            return true;
+        }
+        if (msg.type === 'APPLY_READING_PREFS') {
+            applyReadingPrefs(msg.prefs);
+            sendResponse({ ok: true });
+            return true;
+        }
+        if (msg.type === 'APPLY_SIMPLIFY_PREFS') {
+            applySimplifyPrefs(msg.prefs);
+            sendResponse({ ok: true });
+            return true;
+        }
+        if (msg.type === 'ACTIVATE_LOCK') injectBanner(msg.intent);
+        if (msg.type === 'DEACTIVATE_LOCK') removeBanner();
+        if (msg.type === 'SET_VISUAL_ALERTS') {
+            visualAlertsEnabled = msg.enabled;
+            sendResponse({ ok: true });
+        }
+        if (msg.type === 'SET_ALERT_COLOR') {
+            alertColor = msg.color;
+            sendResponse({ ok: true });
+        }
+        if (msg.type === 'TEST_FLASH') {
+            triggerFlash();
+            showToast('Test', 'Flash is working! 🎉');
+            sendResponse({ ok: true });
+        }
+    });
+} catch (_) { /* extension context invalidated — ignore */ }
 
 // ==========================================
 // FEATURE 4: POST SIMPLIFIER
@@ -2025,7 +2072,7 @@ function checkSavedJobAutoInject() {
     if (!location.href.includes('/jobs/view/')) return;
     
     setTimeout(() => {
-        chrome.storage.local.get(['savedJobs'], (data) => {
+        safeStorageGet(['savedJobs'], (data) => {
             const jobs = data.savedJobs || [];
             const urlMatch = location.href.match(/view\/(\d+)/);
             if (!urlMatch) return;
@@ -2053,17 +2100,17 @@ new MutationObserver(() => {
 // ==========================================
 // INITIALIZATION
 // ==========================================
-chrome.storage.local.get(['intentLock', 'lockActive'], (data) => {
+safeStorageGet(['intentLock', 'lockActive'], (data) => {
     if (data.lockActive && data.intentLock) {
         injectBanner(data.intentLock);
     }
 });
 
-chrome.storage.local.get(['readingPrefs'], (data) => {
+safeStorageGet(['readingPrefs'], (data) => {
     applyReadingPrefs(data.readingPrefs);
 });
 
-chrome.storage.local.get(['simplifyPrefs'], (data) => {
+safeStorageGet(['simplifyPrefs'], (data) => {
     applySimplifyPrefs(data.simplifyPrefs);
     startSimplifierObserver();
 });
@@ -2073,7 +2120,7 @@ injectShortcutsButton();
 startSensoryBadgeObserver();
 
 window.setTimeout(() => {
-    chrome.storage.local.get(['simplifyPrefs'], (data) => {
+    safeStorageGet(['simplifyPrefs'], (data) => {
         const prefs = { ...DEFAULT_SIMPLIFY_PREFS, ...(data.simplifyPrefs || {}) };
         if (prefs.enabled) {
             ensureSimplifierStyles();
@@ -2771,18 +2818,20 @@ document.addEventListener('keydown', (e) => {
 });
 
 // Listen for toggle from popup
-chrome.runtime.onMessage.addListener((msg) => {
-    if (msg.type === 'APPLY_IMAGE_DESCRIBER_PREF') {
-        applyImageDescriberPref(msg.enabled);
-    }
-});
+try {
+    chrome.runtime.onMessage.addListener((msg) => {
+        if (msg.type === 'APPLY_IMAGE_DESCRIBER_PREF') {
+            applyImageDescriberPref(msg.enabled);
+        }
+    });
+} catch (_) { /* extension context invalidated — ignore */ }
 
-chrome.storage.local.get(['imageDescriberEnabled'], (data) => {
+safeStorageGet(['imageDescriberEnabled'], (data) => {
     applyImageDescriberPref(Boolean(data.imageDescriberEnabled));
 });
 
 setInterval(() => {
-    chrome.storage.local.get(['imageDescriberEnabled'], (data) => {
+    safeStorageGet(['imageDescriberEnabled'], (data) => {
         const shouldBeEnabled = Boolean(data.imageDescriberEnabled);
         const btnExists = Boolean(document.getElementById('accessin-describe-btn'));
         if (shouldBeEnabled && !btnExists) injectImageDescriberButton();
@@ -2885,7 +2934,7 @@ function startInlineButtonScan() {
 // ── Page Load Accessibility Reminders Toast ────────────────────────────────────
 
 function checkAndShowReminders() {
-    chrome.storage.local.get(['savedJobs'], (data) => {
+    safeStorageGet(['savedJobs'], (data) => {
         const jobs = data.savedJobs || [];
         const reminderJobs = jobs.filter(j => j.reminder);
 
