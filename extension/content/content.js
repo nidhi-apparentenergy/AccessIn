@@ -410,57 +410,60 @@ function updateButtonUI(text) {
 // THE SPATIAL KEYBOARD LISTENER
 // ==========================================
 document.addEventListener('keydown', (e) => {
-    if (!e.altKey) return;
+    if (!isExtensionContextValid()) return;
+    try {
+        if (!e.altKey) return;
 
-    if (e.code === 'ArrowUp') {
-        e.preventDefault();
-        const nextIdx = findNearestItem('up');
-        if (nextIdx !== -1) readItemAt(nextIdx);
-    }
-
-    if (e.code === 'ArrowDown') {
-        e.preventDefault();
-        if (currentItemIndex === -1) {
-            readItemAt(0);
-        } else {
-            const nextIdx = findNearestItem('down');
+        if (e.code === 'ArrowUp') {
+            e.preventDefault();
+            const nextIdx = findNearestItem('up');
             if (nextIdx !== -1) readItemAt(nextIdx);
         }
-    }
 
-    if (e.code === 'ArrowLeft') {
-        e.preventDefault();
-        const nextIdx = findNearestItem('left');
-        if (nextIdx !== -1) readItemAt(nextIdx);
-    }
-
-    if (e.code === 'ArrowRight') {
-        e.preventDefault();
-        const nextIdx = findNearestItem('right');
-        if (nextIdx !== -1) readItemAt(nextIdx);
-    }
-
-    if (e.code === 'KeyS') {
-        e.preventDefault();
-        window.speechSynthesis.cancel();
-        isReading = false;
-        updateButtonUI("🔊 Read Aloud\n(Alt+Arrows)");
-        if (currentItemIndex >= 0 && textBlocks[currentItemIndex]) {
-            textBlocks[currentItemIndex].style.outline = 'none';
+        if (e.code === 'ArrowDown') {
+            e.preventDefault();
+            if (currentItemIndex === -1) {
+                readItemAt(0);
+            } else {
+                const nextIdx = findNearestItem('down');
+                if (nextIdx !== -1) readItemAt(nextIdx);
+            }
         }
-    }
 
-    if (e.code === 'Equal' || e.key === '+') {
-        e.preventDefault();
-        currentSpeed = Math.min(2.0, parseFloat((currentSpeed + 0.1).toFixed(1)));
-        announceSpeed();
-    }
+        if (e.code === 'ArrowLeft') {
+            e.preventDefault();
+            const nextIdx = findNearestItem('left');
+            if (nextIdx !== -1) readItemAt(nextIdx);
+        }
 
-    if (e.code === 'Minus' || e.key === '-') {
-        e.preventDefault();
-        currentSpeed = Math.max(0.5, parseFloat((currentSpeed - 0.1).toFixed(1)));
-        announceSpeed();
-    }
+        if (e.code === 'ArrowRight') {
+            e.preventDefault();
+            const nextIdx = findNearestItem('right');
+            if (nextIdx !== -1) readItemAt(nextIdx);
+        }
+
+        if (e.code === 'KeyS') {
+            e.preventDefault();
+            window.speechSynthesis.cancel();
+            isReading = false;
+            updateButtonUI("🔊 Read Aloud\n(Alt+Arrows)");
+            if (currentItemIndex >= 0 && textBlocks[currentItemIndex]) {
+                textBlocks[currentItemIndex].style.outline = 'none';
+            }
+        }
+
+        if (e.code === 'Equal' || e.key === '+') {
+            e.preventDefault();
+            currentSpeed = Math.min(2.0, parseFloat((currentSpeed + 0.1).toFixed(1)));
+            announceSpeed();
+        }
+
+        if (e.code === 'Minus' || e.key === '-') {
+            e.preventDefault();
+            currentSpeed = Math.max(0.5, parseFloat((currentSpeed - 0.1).toFixed(1)));
+            announceSpeed();
+        }
+    } catch (_) { /* extension context invalidated — ignore */ }
 });
 
 window.addEventListener('beforeunload', () => {
@@ -790,20 +793,23 @@ function handleNewMessageNode(node) {
 // Observe the full document for messaging panel mutations.
 // LinkedIn is a SPA — the messaging panel mounts/unmounts dynamically.
 const msgObserver = new MutationObserver((mutations) => {
-    if (!visualAlertsEnabled) return;
-    for (const mutation of mutations) {
-        for (const node of mutation.addedNodes) {
-            const msgNode = findMessageNode(node);
-            if (msgNode) {
-                // Wait 150ms for LinkedIn SPA to populate text and classes (optimistic rendering delay)
-                setTimeout(() => {
-                    if (msgNode.isConnected) {
-                        handleNewMessageNode(msgNode);
-                    }
-                }, 150);
+    if (!isExtensionContextValid()) return;
+    try {
+        if (!visualAlertsEnabled) return;
+        for (const mutation of mutations) {
+            for (const node of mutation.addedNodes) {
+                const msgNode = findMessageNode(node);
+                if (msgNode) {
+                    // Wait 150ms for LinkedIn SPA to populate text and classes (optimistic rendering delay)
+                    setTimeout(() => {
+                        if (msgNode.isConnected) {
+                            handleNewMessageNode(msgNode);
+                        }
+                    }, 150);
+                }
             }
         }
-    }
+    } catch (_) { /* extension context invalidated — ignore */ }
 });
 
 msgObserver.observe(document.body, { childList: true, subtree: true });
@@ -2747,74 +2753,80 @@ function applyImageDescriberPref(enabled) {
 // Ctrl+D                  → describe focused image
 // Ctrl+S                  → stop speech + close panel
 document.addEventListener('keydown', (e) => {
-    if (!e.ctrlKey || e.altKey || e.shiftKey || e.metaKey) return;
-    if (!imageDescriberEnabled) return;
+    if (!isExtensionContextValid()) return;
+    try {
+        if (!e.ctrlKey || e.altKey || e.shiftKey || e.metaKey) return;
+        if (!imageDescriberEnabled) return;
 
-    const tag = document.activeElement?.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable) return;
+        const tag = document.activeElement?.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable) return;
 
-    if (e.code === 'ArrowUp') {
-        e.preventDefault();
-        const feedEl = document.querySelector('.scaffold-finite-scroll__content')
-            || document.querySelector('main') || document.documentElement;
-        feedEl.scrollBy({ top: -window.innerHeight * 0.8, behavior: 'smooth' });
-        window.scrollBy({ top: -window.innerHeight * 0.8, behavior: 'smooth' });
-    }
-
-    if (e.code === 'ArrowDown') {
-        e.preventDefault();
-        const feedEl = document.querySelector('.scaffold-finite-scroll__content')
-            || document.querySelector('main') || document.documentElement;
-        feedEl.scrollBy({ top: window.innerHeight * 0.8, behavior: 'smooth' });
-        window.scrollBy({ top: window.innerHeight * 0.8, behavior: 'smooth' });
-    }
-
-    if (e.code === 'ArrowLeft') {
-        e.preventDefault();
-        navigateImages('prev');
-    }
-
-    if (e.code === 'ArrowRight') {
-        e.preventDefault();
-        navigateImages('next');
-    }
-
-    if (e.code === 'KeyD') {
-        e.preventDefault();
-        const img = currentImageIndex >= 0 && descImages[currentImageIndex]
-            ? descImages[currentImageIndex]
-            : findBestVisibleImage();
-        describeImage(img);
-    }
-
-    if (e.code === 'KeyS') {
-        e.preventDefault();
-        window.speechSynthesis.cancel();
-        document.getElementById('accessin-desc-panel')?.remove();
-        if (currentImageIndex >= 0 && descImages[currentImageIndex]) {
-            updateDescribeButtonUI(`🖼️ Image ${currentImageIndex + 1} of ${descImages.length}\n(Ctrl+D to describe)`);
-        } else {
-            updateDescribeButtonUI();
+        if (e.code === 'ArrowUp') {
+            e.preventDefault();
+            const feedEl = document.querySelector('.scaffold-finite-scroll__content')
+                || document.querySelector('main') || document.documentElement;
+            feedEl.scrollBy({ top: -window.innerHeight * 0.8, behavior: 'smooth' });
+            window.scrollBy({ top: -window.innerHeight * 0.8, behavior: 'smooth' });
         }
-        const _b = document.getElementById('accessin-describe-btn');
-        if (_b) _b.disabled = false;
-        announceDescriber('Description stopped.');
-    }
+
+        if (e.code === 'ArrowDown') {
+            e.preventDefault();
+            const feedEl = document.querySelector('.scaffold-finite-scroll__content')
+                || document.querySelector('main') || document.documentElement;
+            feedEl.scrollBy({ top: window.innerHeight * 0.8, behavior: 'smooth' });
+            window.scrollBy({ top: window.innerHeight * 0.8, behavior: 'smooth' });
+        }
+
+        if (e.code === 'ArrowLeft') {
+            e.preventDefault();
+            navigateImages('prev');
+        }
+
+        if (e.code === 'ArrowRight') {
+            e.preventDefault();
+            navigateImages('next');
+        }
+
+        if (e.code === 'KeyD') {
+            e.preventDefault();
+            const img = currentImageIndex >= 0 && descImages[currentImageIndex]
+                ? descImages[currentImageIndex]
+                : findBestVisibleImage();
+            describeImage(img);
+        }
+
+        if (e.code === 'KeyS') {
+            e.preventDefault();
+            window.speechSynthesis.cancel();
+            document.getElementById('accessin-desc-panel')?.remove();
+            if (currentImageIndex >= 0 && descImages[currentImageIndex]) {
+                updateDescribeButtonUI(`🖼️ Image ${currentImageIndex + 1} of ${descImages.length}\n(Ctrl+D to describe)`);
+            } else {
+                updateDescribeButtonUI();
+            }
+            const _b = document.getElementById('accessin-describe-btn');
+            if (_b) _b.disabled = false;
+            announceDescriber('Description stopped.');
+        }
+    } catch (_) { /* extension context invalidated — ignore */ }
 });
 
 // Tab key: cycle images when one is already focused
 document.addEventListener('keydown', (e) => {
-    if (!imageDescriberEnabled || e.key !== 'Tab') return;
-    if (e.ctrlKey || e.altKey || e.metaKey) return;
+    if (!isExtensionContextValid()) return;
+    try {
+        if (!imageDescriberEnabled || e.key !== 'Tab') return;
+        if (e.ctrlKey || e.altKey || e.metaKey) return;
 
-    refreshDescImages();
-    if (descImages.length === 0) return;
+        refreshDescImages();
+        if (descImages.length === 0) return;
 
-    const isOnImage = document.activeElement?.tagName === 'IMG';
-    if (!isOnImage && currentImageIndex === -1) return;
+        const isOnImage = document.activeElement?.tagName === 'IMG';
+        if (!isOnImage && currentImageIndex === -1) return;
 
-    e.preventDefault();
-    navigateImages(e.shiftKey ? 'prev' : 'next');
+        e.preventDefault();
+        navigateImages(e.shiftKey ? 'prev' : 'next');
+    } catch (_) { /* extension context invalidated — ignore */ }
 });
 
 // Listen for toggle from popup
@@ -3432,32 +3444,35 @@ function injectShortcutsButton() {
 
 // Global key listener to toggle the shortcuts panel with Alt+? or ?
 document.addEventListener('keydown', (e) => {
-    const isShortcutKey = (e.key === '?') || (e.altKey && e.key === '?');
-    if (!isShortcutKey) return;
+    if (!isExtensionContextValid()) return;
+    try {
+        const isShortcutKey = (e.key === '?') || (e.altKey && e.key === '?');
+        if (!isShortcutKey) return;
 
-    // Check if the user is currently typing in an input element
-    const activeEl = document.activeElement;
-    if (activeEl && (
-        activeEl.tagName === 'INPUT' || 
-        activeEl.tagName === 'TEXTAREA' || 
-        activeEl.isContentEditable ||
-        activeEl.getAttribute('role') === 'textbox'
-    )) {
-        return;
-    }
-
-    e.preventDefault();
-
-    const dialog = document.getElementById('accessplus-shortcuts-dialog');
-    const shortcutsBtn = document.getElementById('accessplus-shortcuts-btn');
-    if (dialog && shortcutsBtn) {
-        if (dialog.open) {
-            dialog.close();
-            shortcutsBtn.focus();
-        } else {
-            dialog.showModal();
-            const closeBtn = dialog.querySelector('.accessplus-shortcuts-close');
-            if (closeBtn) closeBtn.focus();
+        // Check if the user is currently typing in an input element
+        const activeEl = document.activeElement;
+        if (activeEl && (
+            activeEl.tagName === 'INPUT' || 
+            activeEl.tagName === 'TEXTAREA' || 
+            activeEl.isContentEditable ||
+            activeEl.getAttribute('role') === 'textbox'
+        )) {
+            return;
         }
-    }
+
+        e.preventDefault();
+
+        const dialog = document.getElementById('accessplus-shortcuts-dialog');
+        const shortcutsBtn = document.getElementById('accessplus-shortcuts-btn');
+        if (dialog && shortcutsBtn) {
+            if (dialog.open) {
+                dialog.close();
+                shortcutsBtn.focus();
+            } else {
+                dialog.showModal();
+                const closeBtn = dialog.querySelector('.accessplus-shortcuts-close');
+                if (closeBtn) closeBtn.focus();
+            }
+        }
+    } catch (_) { /* extension context invalidated — ignore */ }
 });
