@@ -1,78 +1,253 @@
-* { box-sizing: border-box; margin: 0; padding: 0; }
+/* popup.css — Premium accessibility styling for LinkedIn Access+ */
+
+:root {
+    --primary: #0a66c2;
+    --primary-hover: #004182;
+    --bg-main: #f8fafc;
+    --bg-card: #ffffff;
+    --text-primary: #0f172a;
+    --text-secondary: #475569;
+    --text-muted: #64748b;
+    --border: #e2e8f0;
+    --border-hover: #cbd5e1;
+    --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05), 0 2px 4px -2px rgb(0 0 0 / 0.05);
+    --shadow-hover: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+    --radius: 12px;
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-heading: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+    /* Accessibility Score Gradients */
+    --score-low: linear-gradient(135deg, #10b981, #059669);
+    --score-medium: linear-gradient(135deg, #f59e0b, #d97706);
+    --score-high: linear-gradient(135deg, #ef4444, #dc2626);
+}
+
+* { 
+    box-sizing: border-box; 
+    margin: 0; 
+    padding: 0; 
+}
 
 body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-family: var(--font-sans);
     font-size: 13px;
-    background: #f9f9f9;
-    color: #1a1a1a;
-    width: 300px;
+    background: var(--bg-main);
+    color: var(--text-primary);
+    width: 360px;
+    overflow-x: hidden;
 }
 
 .container {
-    padding: 14px;
+    padding: 16px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 14px;
 }
 
-.section { display: flex; flex-direction: column; gap: 8px; }
+/* ── Tab Switcher ────────────────────────────────────────────────────────── */
 
-hr { border: none; border-top: 1px solid #e0e0e0; }
+.tabs-header {
+    display: flex;
+    background: #e2e8f0;
+    padding: 4px;
+    border-radius: 10px;
+    margin-bottom: 4px;
+    gap: 4px;
+}
 
-.label { font-weight: 700; color: #1a1a1a; }
+.tab-btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px 10px;
+    background: transparent;
+    color: var(--text-secondary);
+    border: none;
+    border-radius: 8px;
+    font-family: var(--font-heading);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
 
-.hint { font-size: 11px; color: #777; }
+.tab-btn:hover {
+    background: rgba(255, 255, 255, 0.4);
+    color: var(--text-primary);
+}
+
+.tab-btn.active {
+    background: var(--bg-card);
+    color: var(--primary);
+    box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+}
+
+.tab-content {
+    display: none;
+    flex-direction: column;
+    gap: 14px;
+    animation: fadeIn 0.2s ease-out;
+}
+
+.tab-content.active {
+    display: flex;
+}
+
+.badge {
+    background: var(--primary);
+    color: white;
+    font-size: 9px;
+    padding: 1px 6px;
+    border-radius: 10px;
+    font-weight: 800;
+}
+
+/* ── General Sections ────────────────────────────────────────────────────── */
+
+.section { 
+    display: flex; 
+    flex-direction: column; 
+    gap: 8px; 
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px;
+    box-shadow: var(--shadow);
+}
+
+hr { 
+    border: none; 
+    border-top: 1px solid var(--border); 
+}
+
+.label { 
+    font-family: var(--font-heading);
+    font-size: 14px;
+    font-weight: 800; 
+    color: var(--text-primary); 
+}
+
+.hint { 
+    font-size: 11px; 
+    color: var(--text-secondary); 
+    line-height: 1.4;
+}
 
 input[type="text"] {
     width: 100%;
-    padding: 7px 10px;
-    border: 1px solid #ccc;
-    border-radius: 6px;
-    font-size: 13px;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 12px;
+    font-family: var(--font-sans);
     outline: none;
+    transition: all 0.15s;
+    background: var(--bg-main);
 }
-input[type="text"]:focus { border-color: #0a66c2; }
 
-.row { display: flex; gap: 8px; }
+input[type="text"]:focus { 
+    border-color: var(--primary); 
+    background: var(--bg-card);
+    box-shadow: 0 0 0 2px rgba(10, 102, 194, 0.15);
+}
+
+.row { 
+    display: flex; 
+    gap: 8px; 
+}
 
 button {
     flex: 1;
-    padding: 8px 12px;
-    background: #0a66c2;
+    padding: 8px 14px;
+    background: var(--primary);
     color: white;
     border: none;
-    border-radius: 6px;
-    font-size: 13px;
-    font-weight: 600;
+    border-radius: 8px;
+    font-family: var(--font-heading);
+    font-size: 12px;
+    font-weight: 700;
     cursor: pointer;
-    transition: background 0.15s;
+    transition: all 0.15s;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
 }
-button:hover { background: #004182; }
-button:disabled { background: #a0b4c8; cursor: not-allowed; }
-button.secondary { background: #e0e0e0; color: #333; }
-button.secondary:hover { background: #c8c8c8; }
-button.full-width { width: 100%; }
+
+button:hover { 
+    background: var(--primary-hover); 
+    transform: translateY(-0.5px);
+}
+
+button:active {
+    transform: translateY(0.5px);
+}
+
+button:disabled { 
+    background: var(--border-hover); 
+    color: var(--text-muted);
+    cursor: not-allowed; 
+    transform: none;
+}
+
+button.secondary { 
+    background: #e2e8f0; 
+    color: var(--text-primary); 
+}
+
+button.secondary:hover { 
+    background: #cbd5e1; 
+}
+
+button.full-width { 
+    width: 100%; 
+}
+
+/* ── Toggle Switch and Controls ─────────────────────────────────────────── */
 
 .toggle {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 6px 0;
-    color: #333;
-    line-height: 1.35;
+    gap: 10px;
+    padding: 6px 8px;
+    color: var(--text-primary);
+    line-height: 1.4;
+    cursor: pointer;
+    border-radius: 6px;
+    transition: background 0.15s;
+}
+
+.toggle:hover {
+    background: var(--bg-main);
 }
 
 .toggle input {
     width: 16px;
     height: 16px;
-    accent-color: #0a66c2;
+    accent-color: var(--primary);
+    cursor: pointer;
 }
 
-.status { font-size: 12px; color: #555; min-height: 16px; }
-.status.error { color: #c0392b; }
-.status.success { color: #27ae60; }
+.status { 
+    font-size: 11px; 
+    color: var(--text-secondary); 
+    min-height: 16px; 
+    padding: 2px 4px;
+    border-radius: 4px;
+    font-weight: 500;
+}
 
-/* ── Visual Alerts section ───────────────────────────────────────────────── */
+.status.error { 
+    color: #b91c1c; 
+    background: #fee2e2;
+}
+
+.status.success { 
+    color: #15803d; 
+    background: #dcfce7;
+}
 
 .row-center {
     align-items: center;
@@ -81,10 +256,11 @@ button.full-width { width: 100%; }
 
 .toggle-label {
     font-size: 12px;
-    color: #333;
+    font-weight: 600;
+    color: var(--text-primary);
 }
 
-/* Toggle switch */
+/* Custom switch slider styling */
 .switch {
     position: relative;
     display: inline-block;
@@ -92,35 +268,313 @@ button.full-width { width: 100%; }
     height: 20px;
     flex-shrink: 0;
 }
-.switch input { opacity: 0; width: 0; height: 0; }
+
+.switch input { 
+    opacity: 0; 
+    width: 0; 
+    height: 0; 
+}
+
 .slider {
     position: absolute;
     inset: 0;
-    background: #ccc;
+    background: #cbd5e1;
     border-radius: 20px;
     cursor: pointer;
     transition: background 0.2s;
 }
+
 .slider::before {
     content: '';
     position: absolute;
-    width: 14px; height: 14px;
-    left: 3px; bottom: 3px;
+    width: 14px; 
+    height: 14px;
+    left: 3px; 
+    bottom: 3px;
     background: white;
     border-radius: 50%;
     transition: transform 0.2s;
 }
-.switch input:checked + .slider { background: #0a66c2; }
-.switch input:checked + .slider::before { transform: translateX(16px); }
-.switch input:focus-visible + .slider { outline: 2px solid #0a66c2; outline-offset: 2px; }
 
-/* Color picker */
+.switch input:checked + .slider { 
+    background: var(--primary); 
+}
+
+.switch input:checked + .slider::before { 
+    transform: translateX(16px); 
+}
+
 .color-picker {
     width: 36px;
     height: 26px;
     padding: 0;
-    border: 1px solid #ccc;
+    border: 1px solid var(--border);
     border-radius: 6px;
     cursor: pointer;
     background: none;
+}
+
+/* ── Saved Jobs Tracker Styling ────────────────────────────────────────── */
+
+.sort-select {
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-card);
+    font-family: var(--font-sans);
+    font-size: 12px;
+    color: var(--text-primary);
+    outline: none;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.sort-select:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px rgba(10, 102, 194, 0.15);
+}
+
+.saved-jobs-list {
+    max-height: 380px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 2px;
+    scroll-behavior: smooth;
+}
+
+/* Custom Scrollbar for list */
+.saved-jobs-list::-webkit-scrollbar {
+    width: 6px;
+}
+.saved-jobs-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+.saved-jobs-list::-webkit-scrollbar-thumb {
+    background: var(--border-hover);
+    border-radius: 10px;
+}
+
+.empty-state {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 12px;
+    padding: 24px 16px;
+    line-height: 1.5;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-card);
+}
+
+.job-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    box-shadow: var(--shadow);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.job-card:hover {
+    box-shadow: var(--shadow-hover);
+    border-color: var(--border-hover);
+    transform: translateY(-1.5px);
+}
+
+.job-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 8px;
+}
+
+.job-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-width: 78%;
+}
+
+.job-title {
+    font-family: var(--font-heading);
+    font-size: 13.5px;
+    font-weight: 800;
+    color: var(--text-primary);
+    line-height: 1.3;
+}
+
+.job-company {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-secondary);
+}
+
+.job-score-badge {
+    font-family: var(--font-heading);
+    font-weight: 800;
+    color: white;
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 12px;
+    white-space: nowrap;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.score-1, .score-2, .score-3 { background: var(--score-low); }
+.score-4, .score-5, .score-6 { background: var(--score-medium); }
+.score-7, .score-8, .score-9, .score-10 { background: var(--score-high); }
+
+.job-card-details {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--border);
+}
+
+.job-card-details.collapsed {
+    display: none;
+}
+
+.job-explanation {
+    font-size: 11px;
+    color: var(--text-secondary);
+    line-height: 1.45;
+    background: #f1f5f9;
+    padding: 6px 10px;
+    border-radius: 8px;
+    border-left: 3px solid var(--primary);
+}
+
+.job-summary {
+    font-size: 11.5px;
+    color: var(--text-primary);
+    line-height: 1.5;
+}
+
+.job-notes-section {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 2px;
+}
+
+.notes-label {
+    font-family: var(--font-heading);
+    font-weight: 800;
+    font-size: 10.5px;
+    color: var(--primary);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.job-notes-input {
+    width: 100%;
+    min-height: 48px;
+    max-height: 90px;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-family: var(--font-sans);
+    font-size: 12px;
+    color: var(--text-primary);
+    resize: vertical;
+    outline: none;
+    transition: all 0.15s;
+    background: var(--bg-main);
+}
+
+.job-notes-input:focus {
+    border-color: var(--primary);
+    background: var(--bg-card);
+    box-shadow: 0 0 0 2px rgba(10, 102, 194, 0.1);
+}
+
+.job-card-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 4px;
+}
+
+.card-btn {
+    flex: 1;
+    padding: 6px 8px;
+    font-size: 11px;
+    font-weight: 700;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    transition: all 0.15s;
+    font-family: var(--font-heading);
+    border: none;
+}
+
+.details-toggle-btn { 
+    background: #e2e8f0; 
+    color: var(--text-primary); 
+}
+.details-toggle-btn:hover { 
+    background: #cbd5e1; 
+}
+
+.link-btn { 
+    background: #e0f2fe; 
+    color: #0369a1; 
+    text-decoration: none; 
+}
+.link-btn:hover { 
+    background: #bae6fd; 
+}
+
+.delete-btn { 
+    background: #fee2e2; 
+    color: #b91c1c; 
+}
+.delete-btn:hover { 
+    background: #fecaca; 
+}
+
+.reminder-row {
+    margin-top: 2px;
+    padding: 6px 8px;
+    background: var(--bg-main);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+}
+
+/* Focus lock recommendation card in popup */
+.lock-recommendation-card {
+    background: #eef2ff;
+    border: 1px solid #c7d2fe;
+    border-radius: 10px;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 6px;
+}
+.lock-recommendation-card .rec-title {
+    font-family: var(--font-heading);
+    font-weight: 800;
+    font-size: 11.5px;
+    color: #4338ca;
+}
+
+/* Animations */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideDown {
+    from { opacity: 0; max-height: 0; overflow: hidden; }
+    to { opacity: 1; max-height: 300px; }
 }

@@ -19,39 +19,69 @@ function escapeHTML(str) {
 function injectBanner(intent) {
     if (document.getElementById('accessplus-banner')) return;
 
-    const banner = document.createElement('div');
-    banner.id = 'accessplus-banner';
-    banner.style.cssText = `
-    position: fixed; top: 0; left: 0; right: 0; z-index: 99999;
-    background: #0a66c2; color: white;
-    padding: 10px 20px;
-    display: flex; align-items: center; justify-content: space-between;
-    font-family: -apple-system, sans-serif; font-size: 14px;
-  `;
+    chrome.storage.local.get(['savedJobs'], (data) => {
+        const jobs = data.savedJobs || [];
+        const banner = document.createElement('div');
+        banner.id = 'accessplus-banner';
+        banner.style.cssText = `
+            position: fixed; top: 0; left: 0; right: 0; z-index: 99999;
+            background: #0a66c2; color: white;
+            padding: 10px 20px;
+            display: flex; align-items: center; justify-content: space-between;
+            font-family: -apple-system, sans-serif; font-size: 14px;
+        `;
 
-    // Build banner content safely — no innerHTML with user data
-    const focusSpan = document.createElement('span');
-    const strong = document.createElement('strong');
-    strong.textContent = intent;          // textContent — safe
-    focusSpan.appendChild(document.createTextNode('🎯 Focus: '));
-    focusSpan.appendChild(strong);
+        // Build banner content safely — no innerHTML with user data
+        const focusSpan = document.createElement('span');
+        focusSpan.style.cssText = 'display: flex; align-items: center; gap: 12px; flex-wrap: wrap;';
+        
+        const focusLabel = document.createElement('span');
+        const strong = document.createElement('strong');
+        strong.textContent = intent;
+        focusLabel.appendChild(document.createTextNode('🎯 Focus: '));
+        focusLabel.appendChild(strong);
+        focusSpan.appendChild(focusLabel);
 
-    const doneBtn = document.createElement('span');
-    doneBtn.id = 'accessplus-done';
-    doneBtn.textContent = 'Done ✓';
-    doneBtn.style.cssText = 'cursor:pointer; background:white; color:#0a66c2; padding:4px 12px; border-radius:20px; font-size:12px; font-weight:600;';
+        // Saved Jobs Focus Suggestion inside the banner
+        if (jobs.length > 0) {
+            const sorted = [...jobs].sort((a, b) => (a.sensory_load_score || 0) - (b.sensory_load_score || 0));
+            const recJob = sorted[0];
 
-    banner.appendChild(focusSpan);
-    banner.appendChild(doneBtn);
+            const recBadge = document.createElement('span');
+            recBadge.style.cssText = `
+                font-size: 11.5px;
+                background: rgba(255, 255, 255, 0.18);
+                padding: 3px 10px;
+                border-radius: 12px;
+                display: inline-flex;
+                align-items: center;
+                gap: 4px;
+            `;
+            
+            recBadge.innerHTML = `
+                💡 Focus Opportunity: <strong style="color: #ffeb3b;">${escapeHTML(recJob.title)}</strong> at ${escapeHTML(recJob.company)}
+                <a href="${recJob.url || '#'}" target="_blank" style="color: #ffffff; font-weight: 700; text-decoration: underline; margin-left: 4px;">Apply 🔗</a>
+            `;
+            focusSpan.appendChild(recBadge);
+        }
 
-    document.body.prepend(banner);
-    document.body.style.marginTop = '44px';
+        const doneBtn = document.createElement('span');
+        doneBtn.id = 'accessplus-done';
+        doneBtn.textContent = 'Done ✓';
+        doneBtn.style.cssText = 'cursor:pointer; background:white; color:#0a66c2; padding:4px 12px; border-radius:20px; font-size:12px; font-weight:600; flex-shrink: 0;';
 
-    hideFeed();
+        banner.appendChild(focusSpan);
+        banner.appendChild(doneBtn);
 
-    doneBtn.addEventListener('click', () => {
-        chrome.storage.local.set({ lockActive: false });
-        removeBanner();
+        document.body.prepend(banner);
+        document.body.style.marginTop = '44px';
+
+        hideFeed();
+
+        doneBtn.addEventListener('click', () => {
+            chrome.storage.local.set({ lockActive: false });
+            removeBanner();
+        });
     });
 }
 
@@ -1100,150 +1130,292 @@ function injectAnalysisPanel(data) {
     const tipsHTML = (data.match_tips || [])
         .map(t => `<li>${escapeHTML(t)}</li>`).join('');
 
-    const panel = document.createElement('div');
-    panel.id = 'accessin-analysis-panel';
+    // Fetch local storage to check if this job is already saved
+    chrome.storage.local.get(['savedJobs'], (res) => {
+        const savedJobs = res.savedJobs || [];
+        const existingJob = savedJobs.find(j => j.title === data.title && j.company === data.company);
+        
+        const isAlreadySaved = Boolean(existingJob);
+        const savedNotes = existingJob ? existingJob.notes : '';
 
-    // Styles injected once via a <style> tag scoped to the panel id
-    panel.innerHTML = `
-        <style>
-            #accessin-analysis-panel {
-                position: fixed;
-                top: 72px;
-                right: 24px;
-                bottom: 24px;
-                width: 420px;
-                max-width: calc(100vw - 32px);
-                min-width: 320px;
-                z-index: 999999;
-                border: 2px solid #0a66c2;
-                border-radius: 10px;
-                font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-                font-size: 13px;
-                background: #fff;
-                box-shadow: 0 18px 48px rgba(0, 0, 0, 0.22);
-                overflow: hidden;
-                box-sizing: border-box;
-                color: #333;
-            }
-            .ain-header {
-                background: #0a66c2;
-                color: white;
-                padding: 12px 16px;
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-                gap: 12px;
-            }
-            .ain-header-title {
-                font-weight: 700;
-                font-size: 15px;
-                line-height: 1.3;
-                white-space: normal;
-            }
-            .ain-close {
-                flex: 0 0 auto;
-                cursor: pointer;
-                background: rgba(255,255,255,0.2);
-                border: none;
-                color: white;
-                border-radius: 50%;
-                width: 28px;
-                height: 28px;
-                font-size: 16px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-            }
-            .ain-body {
-                height: calc(100% - 52px);
-                padding: 14px 16px 18px;
-                display: flex;
-                flex-direction: column;
-                gap: 14px;
-                overflow-y: auto;
-                box-sizing: border-box;
-            }
-            .ain-score-row {
-                display: flex;
-                align-items: center;
-                gap: 10px;
-                flex-wrap: wrap;
-            }
-            .ain-score-badge {
-                padding: 3px 12px; border-radius: 20px;
-                font-weight: 700; color: white; font-size: 13px;
-                background: ${scoreColor};
-            }
-            .ain-score-label { font-weight: 600; }
-            .ain-score-explain { font-size: 12px; color: #555; margin-top: 4px; line-height: 1.5; }
-            .ain-section { display: flex; flex-direction: column; gap: 6px; }
-            .ain-title {
-                font-weight: 700; font-size: 12px; color: #0a66c2;
-                text-transform: uppercase; letter-spacing: 0.03em;
-            }
-            .ain-summary { line-height: 1.6; color: #333; overflow-wrap: anywhere; }
-            ul.ain-list { padding-left: 18px; margin: 0; display: flex; flex-direction: column; gap: 4px; }
-            ul.ain-list li { line-height: 1.5; color: #333; overflow-wrap: anywhere; }
-            .ain-tags { display: flex; flex-wrap: wrap; gap: 5px; }
-            .ain-tag {
-                background: #e8f0fe; color: #0a66c2;
-                padding: 2px 10px; border-radius: 12px;
-                font-size: 11px; font-weight: 600;
-            }
-            .ain-bias-item {
-                background: #fff8e1; border-left: 3px solid #e67e22;
-                padding: 6px 10px; border-radius: 0 4px 4px 0;
-                display: flex; flex-direction: column; gap: 2px;
-            }
-            .ain-bias-phrase { font-weight: 700; color: #c0392b; font-size: 12px; }
-            .ain-bias-issue { color: #555; font-size: 11px; }
-            .ain-bias-fix { color: #27ae60; font-size: 11px; }
-            @media (max-width: 640px) {
+        const panel = document.createElement('div');
+        panel.id = 'accessin-analysis-panel';
+
+        // Styles injected once via a <style> tag scoped to the panel id
+        panel.innerHTML = `
+            <style>
                 #accessin-analysis-panel {
-                    top: 64px;
-                    right: 12px;
-                    left: 12px;
-                    bottom: 12px;
-                    width: auto;
-                    min-width: 0;
+                    position: fixed;
+                    top: 72px;
+                    right: 24px;
+                    bottom: 24px;
+                    width: 420px;
+                    max-width: calc(100vw - 32px);
+                    min-width: 320px;
+                    z-index: 999999;
+                    border: 2px solid #0a66c2;
+                    border-radius: 10px;
+                    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+                    font-size: 13px;
+                    background: #fff;
+                    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.22);
+                    overflow: hidden;
+                    box-sizing: border-box;
+                    color: #333;
                 }
-            }
-        </style>
-        <div class="ain-header">
-            <span class="ain-header-title">🧠 AccessIn — Job Analysis</span>
-            <button class="ain-close" id="ain-close-btn" aria-label="Close analysis panel">✕</button>
-        </div>
-        <div class="ain-body">
-            <div>
-                <div class="ain-score-row">
-                    <span class="ain-score-label">Sensory Load</span>
-                    <span class="ain-score-badge">${escapeHTML(String(data.sensory_load_score))} / 10</span>
+                .ain-header {
+                    background: #0a66c2;
+                    color: white;
+                    padding: 12px 16px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    gap: 12px;
+                }
+                .ain-header-title {
+                    font-weight: 700;
+                    font-size: 15px;
+                    line-height: 1.3;
+                    white-space: normal;
+                }
+                .ain-close {
+                    flex: 0 0 auto;
+                    cursor: pointer;
+                    background: rgba(255,255,255,0.2);
+                    border: none;
+                    color: white;
+                    border-radius: 50%;
+                    width: 28px;
+                    height: 28px;
+                    font-size: 16px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                }
+                .ain-body {
+                    height: calc(100% - 52px);
+                    padding: 14px 16px 18px;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 14px;
+                    overflow-y: auto;
+                    box-sizing: border-box;
+                }
+                .ain-score-row {
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    gap: 10px;
+                    flex-wrap: wrap;
+                }
+                .ain-score-badge {
+                    padding: 3px 12px; border-radius: 20px;
+                    font-weight: 700; color: white; font-size: 13px;
+                    background: ${scoreColor};
+                }
+                .ain-score-label { font-weight: 600; }
+                .ain-score-explain { font-size: 12px; color: #555; margin-top: 4px; line-height: 1.5; }
+                .ain-section { display: flex; flex-direction: column; gap: 6px; }
+                .ain-title {
+                    font-weight: 700; font-size: 12px; color: #0a66c2;
+                    text-transform: uppercase; letter-spacing: 0.03em;
+                }
+                .ain-summary { line-height: 1.6; color: #333; overflow-wrap: anywhere; }
+                ul.ain-list { padding-left: 18px; margin: 0; display: flex; flex-direction: column; gap: 4px; }
+                ul.ain-list li { line-height: 1.5; color: #333; overflow-wrap: anywhere; }
+                .ain-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+                .ain-tag {
+                    background: #e8f0fe; color: #0a66c2;
+                    padding: 2px 10px; border-radius: 12px;
+                    font-size: 11px; font-weight: 600;
+                }
+                .ain-bias-item {
+                    background: #fff8e1; border-left: 3px solid #e67e22;
+                    padding: 6px 10px; border-radius: 0 4px 4px 0;
+                    display: flex; flex-direction: column; gap: 2px;
+                }
+                .ain-bias-phrase { font-weight: 700; color: #c0392b; font-size: 12px; }
+                .ain-bias-issue { color: #555; font-size: 11px; }
+                .ain-bias-fix { color: #27ae60; font-size: 11px; }
+                
+                /* Saved Jobs Integration */
+                .ain-tracker-box {
+                    margin-top: 6px;
+                    padding: 10px 12px;
+                    background: #f8fafc;
+                    border: 1px solid #e2e8f0;
+                    border-radius: 8px;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 6px;
+                }
+                .ain-tracker-header {
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                }
+                .ain-save-toggle-btn {
+                    padding: 4px 12px;
+                    font-size: 11px;
+                    font-weight: 700;
+                    border-radius: 12px;
+                    border: none;
+                    background: ${isAlreadySaved ? '#27ae60' : '#0a66c2'};
+                    color: white;
+                    cursor: pointer;
+                    transition: background 0.15s;
+                }
+                .ain-save-toggle-btn:hover {
+                    opacity: 0.9;
+                }
+                .ain-notes-label {
+                    font-weight: 700;
+                    font-size: 11px;
+                    color: #475569;
+                }
+                .ain-panel-notes {
+                    width: 100%;
+                    height: 52px;
+                    padding: 6px 8px;
+                    font-size: 12px;
+                    font-family: inherit;
+                    border: 1px solid #cbd5e1;
+                    border-radius: 6px;
+                    resize: none;
+                    outline: none;
+                    background: white;
+                    color: #1e293b;
+                    box-sizing: border-box;
+                    transition: border 0.15s;
+                }
+                .ain-panel-notes:focus {
+                    border-color: #0a66c2;
+                }
+                .ain-save-status {
+                    font-size: 10px;
+                    color: #27ae60;
+                    height: 12px;
+                    font-weight: 700;
+                    margin-top: 2px;
+                }
+                
+                @media (max-width: 640px) {
+                    #accessin-analysis-panel {
+                        top: 64px;
+                        right: 12px;
+                        left: 12px;
+                        bottom: 12px;
+                        width: auto;
+                        min-width: 0;
+                    }
+                }
+            </style>
+            <div class="ain-header">
+                <span class="ain-header-title">🧠 AccessIn — Job Analysis</span>
+                <button class="ain-close" id="ain-close-btn" aria-label="Close analysis panel">✕</button>
+            </div>
+            <div class="ain-body">
+                
+                <!-- Saved Jobs Integration Tracker Panel -->
+                <div class="ain-tracker-box">
+                    <div class="ain-tracker-header">
+                        <span class="ain-notes-label" style="font-weight: 800; color: #0a66c2;">💼 AccessIn Job Tracker</span>
+                        <button class="ain-save-toggle-btn" id="ain-panel-save-btn">${isAlreadySaved ? 'Saved ✓' : 'Save Job'}</button>
+                    </div>
+                    
+                    <div style="display: flex; flex-direction: column; gap: 4px; margin-top: 2px;">
+                        <span class="ain-notes-label">📝 Personal Accessibility Notes:</span>
+                        <textarea class="ain-panel-notes" id="ain-panel-notes-input" placeholder="e.g. Contact HR for ADHD adjustments, remote policy...">${escapeHTML(savedNotes)}</textarea>
+                        <span class="ain-save-status" id="ain-panel-save-status">${isAlreadySaved ? 'Saved to Tracker' : ''}</span>
+                    </div>
                 </div>
-                <div class="ain-score-explain">${escapeHTML(data.sensory_load_explanation)}</div>
-            </div>
-            <div class="ain-section">
-                <div class="ain-title">📋 Simplified Summary</div>
-                <div class="ain-summary">${escapeHTML(data.simplified_summary)}</div>
-            </div>
-            <div class="ain-section">
-                <div class="ain-title">⭐ Key Highlights</div>
-                <ul class="ain-list">${highlightsHTML}</ul>
-            </div>
-            ${biasHTML}
-            <div class="ain-section">
-                <div class="ain-title">🛠 Key Skills</div>
-                <div class="ain-tags">${skillsHTML}</div>
-            </div>
-            <div class="ain-section">
-                <div class="ain-title">💡 Match Tips</div>
-                <ul class="ain-list">${tipsHTML}</ul>
-            </div>
-        </div>
-    `;
 
-    document.body.appendChild(panel);
+                <div>
+                    <div class="ain-score-row">
+                        <span class="ain-score-label">Sensory Load</span>
+                        <span class="ain-score-badge">${escapeHTML(String(data.sensory_load_score))} / 10</span>
+                    </div>
+                    <div class="ain-score-explain">${escapeHTML(data.sensory_load_explanation)}</div>
+                </div>
+                <div class="ain-section">
+                    <div class="ain-title">📋 Simplified Summary</div>
+                    <div class="ain-summary">${escapeHTML(data.simplified_summary)}</div>
+                </div>
+                <div class="ain-section">
+                    <div class="ain-title">⭐ Key Highlights</div>
+                    <ul class="ain-list">${highlightsHTML}</ul>
+                </div>
+                ${biasHTML}
+                <div class="ain-section">
+                    <div class="ain-title">🛠 Key Skills</div>
+                    <div class="ain-tags">${skillsHTML}</div>
+                </div>
+                <div class="ain-section">
+                    <div class="ain-title">💡 Match Tips</div>
+                    <ul class="ain-list">${tipsHTML}</ul>
+                </div>
+            </div>
+        `;
 
-    document.getElementById('ain-close-btn').addEventListener('click', removeAnalysisPanel);
+        document.body.appendChild(panel);
+
+        document.getElementById('ain-close-btn').addEventListener('click', removeAnalysisPanel);
+
+        // Core Saving Logic for the inline panel
+        const saveBtn = document.getElementById('ain-panel-save-btn');
+        const notesInput = document.getElementById('ain-panel-notes-input');
+        const statusText = document.getElementById('ain-panel-save-status');
+
+        function performSave(notesText) {
+            chrome.storage.local.get(['savedJobs'], (saveRes) => {
+                const sJobs = saveRes.savedJobs || [];
+                const existingIdx = sJobs.findIndex(j => j.title === data.title && j.company === data.company);
+
+                const newJob = {
+                    id: existingIdx >= 0 ? sJobs[existingIdx].id : 'job_' + Date.now(),
+                    title: data.title || 'Unknown Job',
+                    company: data.company || 'Unknown Company',
+                    sensory_load_score: data.sensory_load_score || 0,
+                    sensory_load_explanation: data.sensory_load_explanation || '',
+                    simplified_summary: data.simplified_summary || '',
+                    key_highlights: data.key_highlights || [],
+                    key_skills: data.key_skills || [],
+                    match_tips: data.match_tips || [],
+                    url: window.location.href,
+                    notes: notesText,
+                    reminder: existingIdx >= 0 ? sJobs[existingIdx].reminder : false,
+                    savedAt: existingIdx >= 0 ? sJobs[existingIdx].savedAt : Date.now()
+                };
+
+                if (existingIdx >= 0) {
+                    sJobs[existingIdx] = newJob;
+                } else {
+                    sJobs.push(newJob);
+                }
+
+                chrome.storage.local.set({ savedJobs: sJobs }, () => {
+                    if (saveBtn) {
+                        saveBtn.textContent = 'Saved ✓';
+                        saveBtn.style.background = '#27ae60';
+                    }
+                    if (statusText) {
+                        statusText.textContent = 'Saved to Tracker';
+                        statusText.style.color = '#27ae60';
+                    }
+                });
+            });
+        }
+
+        saveBtn?.addEventListener('click', () => {
+            performSave(notesInput ? notesInput.value.trim() : '');
+        });
+
+        notesInput?.addEventListener('input', (e) => {
+            // Typing auto-saves instantly!
+            const text = e.target.value;
+            performSave(text);
+        });
+    });
 }
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
@@ -1756,7 +1928,6 @@ function ensureReadingModeStyles() {
 
 function applyReadingPrefs(prefs = DEFAULT_READING_PREFS) {
     ensureReadingModeStyles();
-
     const mergedPrefs = { ...DEFAULT_READING_PREFS, ...prefs };
     const root = document.documentElement;
 
@@ -1767,6 +1938,39 @@ function applyReadingPrefs(prefs = DEFAULT_READING_PREFS) {
     root.classList.toggle('accessplus-reduce-motion', mergedPrefs.reduceMotion);
     root.classList.toggle('accessplus-hide-clutter', mergedPrefs.hideClutter);
 }
+
+// ==========================================
+// AUTO-INJECT SAVED JOB ANALYSIS
+// ==========================================
+let lastUrl = location.href;
+function checkSavedJobAutoInject() {
+    if (!location.href.includes('/jobs/view/')) return;
+    
+    setTimeout(() => {
+        chrome.storage.local.get(['savedJobs'], (data) => {
+            const jobs = data.savedJobs || [];
+            const urlMatch = location.href.match(/view\/(\d+)/);
+            if (!urlMatch) return;
+            const currentJobId = urlMatch[1];
+            
+            const savedJob = jobs.find(j => j.url && j.url.includes(currentJobId));
+            if (savedJob && !document.getElementById('accessin-analysis-panel')) {
+                injectAnalysisPanel(savedJob);
+            }
+        });
+    }, 1500);
+}
+
+// Check on initial load
+window.addEventListener('load', checkSavedJobAutoInject);
+
+// Watch for SPA URL changes
+new MutationObserver(() => {
+    if (location.href !== lastUrl) {
+        lastUrl = location.href;
+        checkSavedJobAutoInject();
+    }
+}).observe(document, { subtree: true, childList: true });
 
 // ==========================================
 // INITIALIZATION
@@ -2506,3 +2710,178 @@ setInterval(() => {
         else if (!shouldBeEnabled && btnExists) removeImageDescriberButton();
     });
 }, 2000);
+
+// ── Inline Button Injection on LinkedIn Job Detail Pane ──────────────────────────
+
+function startInlineButtonScan() {
+    window.setInterval(() => {
+        if (document.getElementById('accessin-inline-analyze-btn')) return;
+
+        // Try several standard action headers and buttons on LinkedIn job detail panes
+        const actionsEl = document.querySelector(
+            '.jobs-apply-button--top-card, ' +
+            '.jobs-save-button, ' +
+            '[class*="top-card-layout__actions"], ' +
+            '[class*="jobs-unified-top-card__content-container"] [class*="actions"]'
+        );
+
+        if (actionsEl) {
+            const parent = actionsEl.parentElement;
+            if (parent && !parent.querySelector('#accessin-inline-analyze-btn')) {
+                const btn = document.createElement('button');
+                btn.id = 'accessin-inline-analyze-btn';
+                btn.type = 'button';
+                btn.innerHTML = '🧠 Analyze Accessibility';
+
+                btn.style.cssText = `
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 6px;
+                    margin-left: 8px;
+                    padding: 8px 16px;
+                    border: 1.5px solid #0a66c2;
+                    border-radius: 20px;
+                    background: #ffffff;
+                    color: #0a66c2;
+                    cursor: pointer;
+                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+                    font-size: 13px;
+                    font-weight: 700;
+                    transition: all 0.2s ease;
+                    vertical-align: middle;
+                    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+                `;
+
+                btn.addEventListener('mouseenter', () => {
+                    btn.style.background = '#eef6ff';
+                    btn.style.borderColor = '#004182';
+                    btn.style.color = '#004182';
+                });
+                btn.addEventListener('mouseleave', () => {
+                    btn.style.background = '#ffffff';
+                    btn.style.borderColor = '#0a66c2';
+                    btn.style.color = '#0a66c2';
+                });
+
+                btn.addEventListener('click', async () => {
+                    btn.disabled = true;
+                    btn.textContent = '🧠 Analyzing Job...';
+                    
+                    const jd = extractJobDescription();
+                    if (!jd) {
+                        alert("AccessIn Error: Could not read job description. Open a specific job page first.");
+                        btn.disabled = false;
+                        btn.innerHTML = '🧠 Analyze Accessibility';
+                        return;
+                    }
+
+                    try {
+                        const response = await fetch('http://localhost:8000/analyze', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ job_description: jd }),
+                        });
+
+                        if (!response.ok) {
+                            throw new Error(`Server returned status ${response.status}`);
+                        }
+
+                        const data = await response.json();
+                        injectAnalysisPanel(data);
+                    } catch (err) {
+                        alert("AccessIn Error: Backend analysis failed. Ensure your server is running at http://localhost:8000. Detail: " + err.message);
+                    } finally {
+                        btn.disabled = false;
+                        btn.innerHTML = '🧠 Analyze Accessibility';
+                    }
+                });
+
+                actionsEl.insertAdjacentElement('afterend', btn);
+            }
+        }
+    }, 1000);
+}
+
+// ── Page Load Accessibility Reminders Toast ────────────────────────────────────
+
+function checkAndShowReminders() {
+    chrome.storage.local.get(['savedJobs'], (data) => {
+        const jobs = data.savedJobs || [];
+        const reminderJobs = jobs.filter(j => j.reminder);
+
+        if (reminderJobs.length === 0) return;
+
+        // Prioritize: show the lowest sensory load score reminder job
+        reminderJobs.sort((a, b) => (a.sensory_load_score || 0) - (b.sensory_load_score || 0));
+        const remJob = reminderJobs[0];
+
+        // Ensure slide-in keyframe animation style
+        if (!document.getElementById('accessplus-toast-styles')) {
+            const style = document.createElement('style');
+            style.id = 'accessplus-toast-styles';
+            style.textContent = `
+                @keyframes accessin-toast-slide {
+                    0%   { opacity: 0; transform: translateY(40px) scale(0.95); }
+                    100% { opacity: 1; transform: translateY(0) scale(1); }
+                }
+                #accessplus-reminder-toast {
+                    position: fixed;
+                    bottom: 24px;
+                    left: 24px;
+                    width: 320px;
+                    background: #ffffff;
+                    border-left: 5px solid #0a66c2;
+                    border-radius: 10px;
+                    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.16);
+                    padding: 14px 16px;
+                    z-index: 2147483647;
+                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                    font-size: 13px;
+                    color: #1e293b;
+                    box-sizing: border-box;
+                    animation: accessin-toast-slide 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+                }
+            `;
+            document.head.appendChild(style);
+        }
+
+        const toast = document.createElement('div');
+        toast.id = 'accessplus-reminder-toast';
+        toast.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+                <div style="flex: 1;">
+                    <div style="display: flex; align-items: center; gap: 6px; font-weight: 800; color: #0a66c2; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.03em;">
+                        <span>🔔 AccessIn Reminder</span>
+                    </div>
+                    <div style="font-weight: 800; font-size: 13px; color: #0f172a; margin-top: 5px; line-height: 1.35;">${escapeHTML(remJob.title)}</div>
+                    <div style="font-size: 11px; font-weight: 700; color: #64748b; margin-top: 2px;">${escapeHTML(remJob.company)}</div>
+                    
+                    ${remJob.notes ? `
+                        <div style="margin-top: 8px; font-size: 11px; color: #1e3a8a; background: #eff6ff; padding: 6px 10px; border-radius: 6px; border-left: 2px solid #3b82f6; line-height: 1.45;">
+                            📝 <em>"${escapeHTML(remJob.notes)}"</em>
+                        </div>
+                    ` : ''}
+                </div>
+                <button id="accessin-toast-close" style="background:none; border:none; font-size: 16px; cursor:pointer; color:#94a3b8; line-height:1; padding:0 2px;">✕</button>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px; padding-top: 10px; border-top: 1px dashed #e2e8f0;">
+                <span style="font-weight: 800; color: white; background: #27ae60; font-size: 9.5px; padding: 2.5px 8px; border-radius: 12px;">Sensory Score: ${remJob.sensory_load_score || 0}/10</span>
+                <a href="${remJob.url || '#'}" target="_blank" style="font-weight: 800; color: #0a66c2; font-size: 11px; text-decoration: underline;">Apply Today 🔗</a>
+            </div>
+        `;
+
+        document.body.appendChild(toast);
+
+        // Bind dismiss handlers
+        toast.querySelector('#accessin-toast-close').addEventListener('click', () => {
+            toast.remove();
+        });
+    });
+}
+
+// Start scanner and checker on initial script execution
+startInlineButtonScan();
+
+// Show reminder toast shortly after page load
+setTimeout(checkAndShowReminders, 2500);

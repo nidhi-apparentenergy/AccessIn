@@ -6,14 +6,23 @@
     "permissions": [
         "storage",
         "activeTab",
-        "scripting"
+        "scripting",
+        "sidePanel",
+        "tabs"
     ],
     "host_permissions": [
         "http://localhost:8000/*",
-        "https://localhost:8000/*"
+        "https://localhost:8000/*",
+        "https://www.linkedin.com/*"
     ],
+    "background": {
+        "service_worker": "background.js"
+    },
     "action": {
-        "default_popup": "popup/popup.html"
+        "default_title": "Open LinkedIn Access+ Panel"
+    },
+    "side_panel": {
+        "default_path": "popup/popup.html"
     },
     "content_scripts": [
         {

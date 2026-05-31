@@ -393,3 +393,261 @@ document.getElementById('imageDescriberToggle')?.addEventListener('change', asyn
         setTimeout(() => setStatus('imageDescriberStatus', '', ''), 2000);
     });
 });
+
+// ── Tabs Switching Logic ──────────────────────────────────────────────────────
+
+const tabToolsBtn = document.getElementById('tab-tools-btn');
+const tabSavedBtn = document.getElementById('tab-saved-btn');
+const tabToolsContent = document.getElementById('tab-tools-content');
+const tabSavedContent = document.getElementById('tab-saved-content');
+
+function switchTab(activeTab) {
+    if (activeTab === 'tools') {
+        tabToolsBtn.classList.add('active');
+        tabSavedBtn.classList.remove('active');
+        tabToolsContent.classList.add('active');
+        tabSavedContent.classList.remove('active');
+    } else {
+        tabToolsBtn.classList.remove('active');
+        tabSavedBtn.classList.add('active');
+        tabToolsContent.classList.remove('active');
+        tabSavedContent.classList.add('active');
+        renderSavedJobs();
+    }
+}
+
+tabToolsBtn?.addEventListener('click', () => switchTab('tools'));
+tabSavedBtn?.addEventListener('click', () => switchTab('saved'));
+
+// ── Saved Jobs Tracker State & Rendering ──────────────────────────────────────
+
+function updateBadgeCount() {
+    chrome.storage.local.get(['savedJobs'], (data) => {
+        const jobs = data.savedJobs || [];
+        const countBadge = document.getElementById('saved-jobs-count');
+        if (countBadge) countBadge.textContent = jobs.length;
+    });
+}
+
+function renderSavedJobs() {
+    chrome.storage.local.get(['savedJobs'], (data) => {
+        const jobs = data.savedJobs || [];
+        const container = document.getElementById('savedJobsList');
+        if (!container) return;
+
+        // Update badge count
+        const countBadge = document.getElementById('saved-jobs-count');
+        if (countBadge) countBadge.textContent = jobs.length;
+
+        // Apply filters
+        const searchInput = document.getElementById('savedJobsSearch');
+        const query = searchInput ? searchInput.value.trim().toLowerCase() : '';
+        
+        let filteredJobs = jobs.filter(job => {
+            const title = (job.title || '').toLowerCase();
+            const company = (job.company || '').toLowerCase();
+            const notes = (job.notes || '').toLowerCase();
+            return title.includes(query) || company.includes(query) || notes.includes(query);
+        });
+
+        // Apply sorting
+        const sortSelect = document.getElementById('savedJobsSort');
+        const sortBy = sortSelect ? sortSelect.value : 'score-asc';
+
+        filteredJobs.sort((a, b) => {
+            if (sortBy === 'score-asc') {
+                return (a.sensory_load_score || 0) - (b.sensory_load_score || 0);
+            } else if (sortBy === 'score-desc') {
+                return (b.sensory_load_score || 0) - (a.sensory_load_score || 0);
+            } else if (sortBy === 'recent') {
+                return (b.savedAt || 0) - (a.savedAt || 0);
+            }
+            return 0;
+        });
+
+        if (filteredJobs.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    ${query ? 'No matching saved jobs found.' : 'No saved jobs yet.<br/>Navigate to any LinkedIn job details page and use the inline <strong>🧠 Analyze with AccessIn</strong> button.'}
+                </div>
+            `;
+            return;
+        }
+
+        container.innerHTML = '';
+        filteredJobs.forEach(job => {
+            const card = document.createElement('div');
+            card.className = 'job-card';
+            card.dataset.id = job.id;
+
+            const hasReminder = Boolean(job.reminder);
+
+            card.innerHTML = `
+                <div class="job-card-header">
+                    <div class="job-info">
+                        <h4 class="job-title">${escapeHTML(job.title || 'Unknown Job')}</h4>
+                        <span class="job-company">${escapeHTML(job.company || 'Unknown Company')}</span>
+                    </div>
+                    <div class="job-score-badge score-${job.sensory_load_score || 0}">
+                        Sensory: ${job.sensory_load_score || 0}/10
+                    </div>
+                </div>
+                
+                <div class="job-card-details collapsed" id="details-${job.id}">
+                    <p class="job-explanation"><em>${escapeHTML(job.sensory_load_explanation || 'No sensory breakdown provided.')}</em></p>
+                    <p class="job-summary">${escapeHTML(job.simplified_summary || 'No plain-language summary.')}</p>
+                    
+                    <div class="row row-center reminder-row">
+                        <label class="toggle-label" for="reminder-${job.id}">🔔 Set Application Reminder</label>
+                        <label class="switch" aria-label="Toggle application reminder">
+                            <input type="checkbox" id="reminder-${job.id}" class="reminder-toggle" data-id="${job.id}" ${hasReminder ? 'checked' : ''} />
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+
+                    <div class="job-notes-section">
+                        <label class="notes-label">📝 Accessibility Notes:</label>
+                        <textarea class="job-notes-input" placeholder="e.g. Contact HR for adjustments, asks for flexible hours..." data-id="${job.id}">${escapeHTML(job.notes || '')}</textarea>
+                    </div>
+                </div>
+                
+                <div class="job-card-actions">
+                    <button class="card-btn details-toggle-btn" id="btn-toggle-${job.id}">Details ▾</button>
+                    <a href="${job.url || '#'}" target="_blank" class="card-btn link-btn">Open 🔗</a>
+                    <button class="card-btn delete-btn" data-id="${job.id}">Delete 🗑️</button>
+                </div>
+            `;
+
+            container.appendChild(card);
+
+            // Toggle details listener
+            card.querySelector(`.details-toggle-btn`).addEventListener('click', () => {
+                const details = card.querySelector(`.job-card-details`);
+                const btn = card.querySelector(`.details-toggle-btn`);
+                const isCollapsed = details.classList.toggle('collapsed');
+                btn.textContent = isCollapsed ? 'Details ▾' : 'Collapse ▴';
+            });
+
+            // Delete listener
+            card.querySelector(`.delete-btn`).addEventListener('click', () => {
+                deleteSavedJob(job.id);
+            });
+
+            // Notes auto-save (instant on input)
+            const notesTextarea = card.querySelector(`.job-notes-input`);
+            notesTextarea.addEventListener('input', (e) => {
+                updateSavedJobNotes(job.id, e.target.value);
+            });
+
+            // Reminder toggle listener
+            const reminderToggle = card.querySelector(`.reminder-toggle`);
+            reminderToggle.addEventListener('change', (e) => {
+                updateSavedJobReminder(job.id, e.target.checked);
+            });
+        });
+    });
+}
+
+// ── Helper Operations ─────────────────────────────────────────────────────────
+
+function deleteSavedJob(id) {
+    chrome.storage.local.get(['savedJobs'], (data) => {
+        const jobs = data.savedJobs || [];
+        const updatedJobs = jobs.filter(j => j.id !== id);
+        chrome.storage.local.set({ savedJobs: updatedJobs }, () => {
+            renderSavedJobs();
+            updateFocusLockRecommendation();
+        });
+    });
+}
+
+function updateSavedJobNotes(id, value) {
+    chrome.storage.local.get(['savedJobs'], (data) => {
+        const jobs = data.savedJobs || [];
+        const updatedJobs = jobs.map(j => {
+            if (j.id === id) {
+                j.notes = value;
+            }
+            return j;
+        });
+        chrome.storage.local.set({ savedJobs: updatedJobs });
+    });
+}
+
+function updateSavedJobReminder(id, enabled) {
+    chrome.storage.local.get(['savedJobs'], (data) => {
+        const jobs = data.savedJobs || [];
+        const updatedJobs = jobs.map(j => {
+            if (j.id === id) {
+                j.reminder = enabled;
+            }
+            return j;
+        });
+        chrome.storage.local.set({ savedJobs: updatedJobs });
+    });
+}
+
+function escapeHTML(str) {
+    if (!str) return '';
+    return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+// Attach filter listeners
+document.getElementById('savedJobsSearch')?.addEventListener('input', renderSavedJobs);
+document.getElementById('savedJobsSort')?.addEventListener('change', renderSavedJobs);
+
+// Initialize badge count on popup load
+updateBadgeCount();
+
+// ── Session Focus / Intent Lock Suggestion ─────────────────────────────────────
+
+function updateFocusLockRecommendation() {
+    chrome.storage.local.get(['lockActive', 'savedJobs'], (data) => {
+        const statusEl = document.getElementById('status');
+        if (!statusEl) return;
+
+        // Remove old recommendation card if present
+        document.getElementById('lock-rec-card')?.remove();
+
+        if (data.lockActive && data.savedJobs && data.savedJobs.length > 0) {
+            // Find lowest sensory load score job (best accessibility)
+            const sortedJobs = [...data.savedJobs].sort((a, b) => (a.sensory_load_score || 0) - (b.sensory_load_score || 0));
+            const recJob = sortedJobs[0];
+
+            const recCard = document.createElement('div');
+            recCard.className = 'lock-recommendation-card';
+            recCard.id = 'lock-rec-card';
+            recCard.innerHTML = `
+                <span class="rec-title">💡 Focused Recommendation:</span>
+                <div style="font-size: 11.5px; color: var(--text-primary); font-weight: 600; margin: 3px 0;">
+                    Apply to <strong>${escapeHTML(recJob.title)}</strong> at ${escapeHTML(recJob.company)}
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
+                    <span class="job-score-badge score-${recJob.sensory_load_score || 0}" style="font-size: 9px; padding: 2px 6px;">Sensory: ${recJob.sensory_load_score || 0}/10</span>
+                    <a href="${recJob.url || '#'}" target="_blank" class="card-btn link-btn" style="padding: 3px 8px; font-size: 9.5px; flex: 0 0 auto;">Apply Now 🔗</a>
+                </div>
+            `;
+            statusEl.insertAdjacentElement('afterend', recCard);
+        }
+    });
+}
+
+// Hook into initial load of Lock status in popup.js
+chrome.storage.local.get(['intentLock', 'lockActive'], (data) => {
+    if (data.lockActive && data.intentLock) {
+        updateFocusLockRecommendation();
+    }
+});
+
+// Update recommendation when lock is toggled
+document.getElementById('setBtn')?.addEventListener('click', () => {
+    setTimeout(updateFocusLockRecommendation, 200);
+});
+document.getElementById('clearBtn')?.addEventListener('click', () => {
+    document.getElementById('lock-rec-card')?.remove();
+});

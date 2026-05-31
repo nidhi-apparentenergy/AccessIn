@@ -2,12 +2,20 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="popup.css" />
 </head>
 <body>
     <div class="container">
 
-        <!-- Focus Lock -->
+        <!-- Tabs Header -->
+        <div class="tabs-header">
+            <button id="tab-tools-btn" class="tab-btn active">🛠️ Tools</button>
+            <button id="tab-saved-btn" class="tab-btn">💼 Saved Jobs <span id="saved-jobs-count" class="badge">0</span></button>
+        </div>
+
+        <div id="tab-tools-content" class="tab-content active">
+            <!-- Focus Lock -->
         <section class="section">
             <p class="label">🎯 Session Focus</p>
             <input type="text" id="intentInput" placeholder="e.g. apply to 2 jobs" />
@@ -120,6 +128,32 @@
             <button id="testFlashBtn" class="secondary full-width">⚡ Test Flash</button>
             <div id="alertStatus" class="status"></div>
         </section>
+        </div>
+
+        <!-- Saved Jobs Content -->
+        <div id="tab-saved-content" class="tab-content">
+            <section class="section">
+                <p class="label">💼 Saved Jobs Tracker</p>
+                <p class="hint">View and manage analyzed jobs, write notes, and set action reminders.</p>
+                
+                <input type="text" id="savedJobsSearch" placeholder="Search by title, company, or notes..." />
+                
+                <div class="row row-center">
+                    <label class="toggle-label" for="savedJobsSort">Sort by:</label>
+                    <select id="savedJobsSort" class="sort-select">
+                        <option value="score-asc">🧠 Sensory: Low to High</option>
+                        <option value="score-desc">🧠 Sensory: High to Low</option>
+                        <option value="recent">📅 Saved: Recent First</option>
+                    </select>
+                </div>
+            </section>
+            
+            <hr />
+            
+            <div id="savedJobsList" class="saved-jobs-list">
+                <p class="empty-state">No saved jobs yet. Navigate to any LinkedIn job page and click "Analyze" to save jobs here!</p>
+            </div>
+        </div>
 
     </div>
     <script src="popup.js"></script>
