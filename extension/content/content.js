@@ -1,6 +1,4 @@
-// ==========================================
 // UTILITIES
-// ==========================================
 
 /**
  * Safely escape a string for insertion into HTML.
@@ -55,9 +53,7 @@ function safeStorageSet(items, callback) {
     } catch (_) { /* extension context invalidated — ignore */ }
 }
 
-// ==========================================
 // FEATURE 1: INTENT LOCK & BANNER LOGIC
-// ==========================================
 
 let bannerTimerInterval = null;
 
@@ -215,9 +211,7 @@ function removeBanner() {
     });
 }
 
-// ==========================================
 // FEATURE 2: 2D SPATIAL TEXT-TO-SPEECH
-// ==========================================
 
 let isReading = false;
 let currentSpeed = 0.9;
@@ -265,7 +259,7 @@ function refreshTextBlocks() {
     textBlocksStale = false;
 }
 
-// --- THE GEOMETRY ENGINE ---
+// THE GEOMETRY ENGINE
 function findNearestItem(direction) {
     refreshTextBlocks();
     if (textBlocks.length === 0) return -1;
@@ -366,9 +360,7 @@ function announceSpeed() {
     speakText(`Speed ${currentSpeed.toFixed(1)}`);
 }
 
-// ==========================================
 // THE VISUAL BUTTON
-// ==========================================
 
 function injectTTSButton() {
     if (document.getElementById('accessplus-tts-btn')) return;
@@ -406,9 +398,8 @@ function updateButtonUI(text) {
     if (btn) btn.innerText = text;
 }
 
-// ==========================================
 // THE SPATIAL KEYBOARD LISTENER
-// ==========================================
+
 document.addEventListener('keydown', (e) => {
     if (!isExtensionContextValid()) return;
     try {
@@ -473,14 +464,12 @@ window.addEventListener('beforeunload', () => {
     if (sensoryBadgeObserver) sensoryBadgeObserver.disconnect();
 });
 
-// ==========================================
-// FEATURE 4: VISUAL NOTIFICATION ALERTS
+// FEATURE 3: VISUAL NOTIFICATION ALERTS
 // Flash/pulse the page for new LinkedIn messages
 // so deaf / hard-of-hearing users aren't reliant
 // on sound to notice incoming messages.
-// ==========================================
 
-// ── Inject keyframe styles once ───────────────────────────────────────────────
+// Inject keyframe styles once
 (function injectVisualAlertStyles() {
     if (document.getElementById('accessin-alert-styles')) return;
     const style = document.createElement('style');
@@ -570,7 +559,7 @@ window.addEventListener('beforeunload', () => {
     document.head.appendChild(style);
 })();
 
-// ── State ─────────────────────────────────────────────────────────────────────
+// State
 let visualAlertsEnabled = true;   // default on; synced from storage
 let alertColor = '#0a66c2';       // default LinkedIn blue; user-configurable
 let toastQueue = [];              // active toast elements
@@ -596,7 +585,7 @@ try {
     });
 } catch (_) { /* extension context invalidated */ }
 
-// ── Flash overlay ─────────────────────────────────────────────────────────────
+// Flash overlay
 function triggerFlash() {
     // Remove any existing overlay first so re-triggering restarts the animation
     const old = document.getElementById('accessin-flash-overlay');
@@ -612,7 +601,7 @@ function triggerFlash() {
     overlay.addEventListener('animationend', () => overlay.remove(), { once: true });
 }
 
-// ── Toast notification ────────────────────────────────────────────────────────
+// Toast notification
 function showToast(sender, preview) {
     // Cap the queue — remove oldest if full
     if (toastQueue.length >= MAX_TOASTS) {
@@ -689,7 +678,7 @@ function dismissToast(toast) {
     }, { once: true });
 }
 
-// ── LinkedIn message DOM watcher ──────────────────────────────────────────────
+// LinkedIn message DOM watcher
 
 /**
  * LinkedIn renders new messages as list items inside the conversation thread.
@@ -814,10 +803,8 @@ const msgObserver = new MutationObserver((mutations) => {
 
 msgObserver.observe(document.body, { childList: true, subtree: true });
 
-// ==========================================
-// FEATURE 3: QUICK SENSORY LOAD BADGES
+// FEATURE 4: QUICK SENSORY LOAD BADGES
 // Adds green/yellow/red dots to LinkedIn job cards using local heuristics.
-// ==========================================
 
 const SENSORY_JARGON_TERMS = [
     'fast-paced', 'high-energy', 'dynamic environment', 'work hard play hard',
@@ -1145,9 +1132,7 @@ window.setTimeout(() => {
     }
 }, 1000);
 
-// ==========================================
-// FEATURE 4: JOB ANALYZER
-// ==========================================
+// FEATURE 5: JOB ANALYZER
 
 function getActiveJobDetailsContainer() {
     return document.querySelector(
@@ -1242,7 +1227,7 @@ function injectAnalysisPanel(data) {
     const scoreColor = data.sensory_load_score <= 3 ? '#27ae60'
         : data.sensory_load_score <= 6 ? '#e67e22' : '#c0392b';
 
-    // ── Build bias flags HTML safely ──────────────────────────────────────────
+    // Build bias flags HTML safely
     let biasHTML = '';
     if (data.bias_flags && data.bias_flags.length > 0) {
         const flagsInner = data.bias_flags.map(f => `
@@ -1602,10 +1587,8 @@ try {
     });
 } catch (_) { /* extension context invalidated — ignore */ }
 
-// ==========================================
-// FEATURE 4: POST SIMPLIFIER
+// FEATURE 6: POST SIMPLIFIER
 // Adds inline simplify buttons to long LinkedIn posts.
-// ==========================================
 
 const SIMPLIFY_API_URL = 'http://localhost:8000/simplify';
 const MIN_SIMPLIFY_CHARS = 120;  // ~20 words minimum
@@ -2023,10 +2006,8 @@ function startSimplifierObserver() {
     window.setInterval(addSimplifyButtons, 2000);
 }
 
-// ==========================================
-// FEATURE 5: READING MODES
+// FEATURE 7: READING MODES
 // Applies dyslexia-friendly and neurodivergent-friendly display options.
-// ==========================================
 
 const DEFAULT_READING_PREFS = {
     largerText: false,
@@ -2166,9 +2147,8 @@ function applyReadingPrefs(prefs = DEFAULT_READING_PREFS) {
     root.classList.toggle('accessplus-hide-clutter', mergedPrefs.hideClutter);
 }
 
-// ==========================================
 // AUTO-INJECT SAVED JOB ANALYSIS
-// ==========================================
+
 let lastUrl = location.href;
 function checkSavedJobAutoInject() {
     if (!location.href.includes('/jobs/view/')) return;
@@ -2199,9 +2179,8 @@ new MutationObserver(() => {
     }
 }).observe(document, { subtree: true, childList: true });
 
-// ==========================================
 // INITIALIZATION
-// ==========================================
+
 safeStorageGet(['intentLock', 'lockActive'], (data) => {
     if (data.lockActive && data.intentLock) {
         injectBanner(data.intentLock);
@@ -2231,11 +2210,9 @@ window.setTimeout(() => {
     });
 }, 1000);
 
-// ==========================================
-// FEATURE 5: PROFILE ACCESSIBILITY SCORE
+// FEATURE 8: PROFILE ACCESSIBILITY SCORE
 // Extracts LinkedIn profile content and injects
 // an accessibility score panel on the page.
-// ==========================================
 
 function extractProfileContent() {
     const profile = {
@@ -2259,7 +2236,7 @@ function extractProfileContent() {
         return clone.innerText?.trim() || '';
     }
 
-    // ── Helper: find a section by its heading text ────────────────────────────
+    // Helper: find a section by its heading text
     // LinkedIn uses <div id="about"> / <div id="experience"> as anchor targets,
     // but the actual section content lives in the nearest ancestor <section>.
     // We also try matching by visible heading text as a robust fallback.
@@ -2296,7 +2273,7 @@ function extractProfileContent() {
         return null;
     }
 
-    // ── Name ─────────────────────────────────────────────────────────────────
+    // ── Name ──
     const nameEl =
         document.querySelector('h1.text-heading-xlarge') ||
         document.querySelector('h1[class*="heading"]') ||
@@ -2304,7 +2281,7 @@ function extractProfileContent() {
         document.querySelector('main h1');
     profile.name = nameEl?.innerText?.trim() || '';
 
-    // ── Headline ──────────────────────────────────────────────────────────────
+    // ── Headline ──
     // Try multiple selectors — LinkedIn changes class names frequently
     const headlineEl =
         document.querySelector('.text-body-medium.break-words') ||
@@ -2333,7 +2310,7 @@ function extractProfileContent() {
         }
     }
 
-    // ── About ─────────────────────────────────────────────────────────────────
+    // ── About ──
     const aboutSection = findSectionByHeading('about');
     if (aboutSection) {
         const text = cleanText(aboutSection).replace(/^About\s*/i, '').trim();
@@ -2351,7 +2328,7 @@ function extractProfileContent() {
         }
     }
 
-    // ── Experience ────────────────────────────────────────────────────────────
+    // ── Experience ──
     const expSection = findSectionByHeading('experience');
     if (expSection) {
         const text = cleanText(expSection).replace(/^Experience\s*/i, '').trim();
@@ -2368,7 +2345,7 @@ function extractProfileContent() {
         }
     }
 
-    // ── Last-resort: grab visible text from the top card ─────────────────────
+    // ── Last-resort: grab visible text from the top card ──
     // If we still have nothing useful, pull text from the profile top card.
     // This is better than returning empty and showing "No profile content found."
     if (!profile.headline && !profile.about && !profile.experience) {
@@ -2572,27 +2549,24 @@ function injectProfileScorePanel(data) {
 }
 
 
-// ==========================================
-// FEATURE: IMAGE DESCRIBER
+// FEATURE 9: IMAGE DESCRIBER
 // Keyboard-first design for blind / low-vision users.
-//
 // Navigation:
 //   Ctrl+Left / Ctrl+Right   — cycle through images on the page
 //   Ctrl+Up  / Ctrl+Down     — scroll the page up / down
 //   Tab (when enabled)       — Tab also cycles images when one is focused
 //   Ctrl+D                   — describe the focused image (or best visible)
 //   Ctrl+S                   — stop description (cancel speech + close panel)
-//
 // Delivery:
 //   - Spoken aloud via Web Speech API
 //   - Shown as a floating text panel
 //   - Blue ring stays on image while it is being described
-// ==========================================
+
 
 const DESCRIBE_API_URL = 'http://localhost:8000/describe';
 let imageDescriberEnabled = false;
 
-// ── Image navigation state ────────────────────────────────────────────────────
+// Image navigation state
 let descImages = [];
 let currentImageIndex = -1;
 let descImagesStale = true;
@@ -2612,7 +2586,7 @@ function refreshDescImages() {
     descImagesStale = false;
 }
 
-// ── Focus ring — blue outline, same colour as Read Aloud ─────────────────────
+// Focus ring — blue outline, same colour as Read Aloud
 function applyImageFocusRing(img) {
     if (!img) return;
     img.style.outline = '4px solid #0a66c2';
@@ -2629,7 +2603,7 @@ function clearImageFocusRing(img) {
     img.removeAttribute('aria-current');
 }
 
-// ── Navigate to image by index ────────────────────────────────────────────────
+// Navigate to image by index
 function focusImageAt(index) {
     refreshDescImages();
     if (descImages.length === 0) { announceDescriber('No images found on this page.'); return; }
@@ -2663,7 +2637,7 @@ function navigateImages(direction) {
     focusImageAt(next);
 }
 
-// ── ARIA live region ──────────────────────────────────────────────────────────
+// ARIA live region
 function ensureLiveRegion() {
     let region = document.getElementById('accessin-live-region');
     if (!region) {
@@ -2715,7 +2689,7 @@ function speakDescription(text, img) {
     window.speechSynthesis.speak(utt);
 }
 
-// ── fetch image as base64 ─────────────────────────────────────────────────────
+// fetch image as base64
 async function fetchImageAsBase64(imgUrl) {
     try {
         const res = await fetch(imgUrl);
@@ -2729,7 +2703,7 @@ async function fetchImageAsBase64(imgUrl) {
     } catch (e) { return null; }
 }
 
-// ── Best visible image fallback ───────────────────────────────────────────────
+// Best visible image fallback
 function findBestVisibleImage() {
     refreshDescImages();
     if (descImages.length === 0) return null;
@@ -2742,7 +2716,7 @@ function findBestVisibleImage() {
     })[0];
 }
 
-// ── Describe an image ─────────────────────────────────────────────────────────
+// Describe an image
 async function describeImage(img) {
     const btn = document.getElementById('accessin-describe-btn');
 
@@ -2795,7 +2769,7 @@ async function describeImage(img) {
     }
 }
 
-// ── Floating description panel ────────────────────────────────────────────────
+// Floating description panel
 function showDescriptionPanel(description) {
     let panel = document.getElementById('accessin-desc-panel');
     if (!panel) {
@@ -2841,14 +2815,14 @@ function showDescriptionPanel(description) {
     panel.focus();
 }
 
-// ── Button UI ─────────────────────────────────────────────────────────────────
+// ── Button UI ──
 function updateDescribeButtonUI(label) {
     const btn = document.getElementById('accessin-describe-btn');
     if (!btn) return;
     btn.innerText = label || '🖼️ Describe Image\n(Ctrl+Arrows)';
 }
 
-// ── Inject floating button ────────────────────────────────────────────────────
+// ── Inject floating button ──
 function injectImageDescriberButton() {
     if (document.getElementById('accessin-describe-btn')) return;
 
@@ -2896,7 +2870,7 @@ function applyImageDescriberPref(enabled) {
     else removeImageDescriberButton();
 }
 
-// ── Keyboard shortcuts ────────────────────────────────────────────────────────
+// Keyboard shortcuts
 // All use Ctrl so they don't conflict with:
 //   - Alt+Arrows / Alt+S  (Read Aloud)
 //   - Shift+Arrows        (browser text selection — can't override)
@@ -3004,7 +2978,7 @@ setInterval(() => {
     });
 }, 2000);
 
-// ── Inline Button Injection on LinkedIn Job Detail Pane ──────────────────────────
+// Inline Button Injection on LinkedIn Job Detail Pane
 
 function startInlineButtonScan() {
     window.setInterval(() => {
@@ -3101,7 +3075,7 @@ function startInlineButtonScan() {
     }, 1000);
 }
 
-// ── Page Load Accessibility Reminders Toast ────────────────────────────────────
+// Page Load Accessibility Reminders Toast
 
 function checkAndShowReminders() {
     safeStorageGet(['savedJobs'], (data) => {
@@ -3184,9 +3158,7 @@ startInlineButtonScan();
 // Show reminder toast shortly after page load
 setTimeout(checkAndShowReminders, 2500);
 
-// ==========================================
-// FEATURE: KEYBOARD SHORTCUTS PANEL
-// ==========================================
+// FEATURE 10: KEYBOARD SHORTCUTS PANEL
 
 function ensureShortcutsStyles() {
     if (document.getElementById('accessplus-shortcuts-styles')) return;
