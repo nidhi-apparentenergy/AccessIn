@@ -27,7 +27,7 @@ router = APIRouter()
 
 MAX_CONTENT_CHARS = 15_000
 
-# ── Models ────────────────────────────────────────────────────────────────────
+# Data Models
 
 class ProfileScoreRequest(BaseModel):
     name: str = ""
@@ -44,23 +44,21 @@ class ProfileScoreRequest(BaseModel):
 
 class ScoreBreakdown(BaseModel):
     category: str
-    score: int       # 0–10, calculated deterministically
-    feedback: str    # AI-generated, describes what was found
-    tip: str         # AI-generated, one actionable improvement
+    score: int       # Deterministic 0-10 score
+    feedback: str    # Qualitative feedback for the category
+    tip: str         # Actionable advice to improve
 
 
 class ProfileScoreResponse(BaseModel):
-    overall_score: int              # 0–100, deterministic
-    grade: str                      # A / B / C / D / F
-    summary: str                    # AI-generated
+    overall_score: int              # Deterministic 0-100 overall score
+    grade: str                      # A, B, C, D, or F
+    summary: str                    # Summary of the profile's accessibility
     breakdown: list[ScoreBreakdown]
-    top_wins: list[str]             # AI-generated
-    top_fixes: list[str]            # AI-generated
+    top_wins: list[str]             # Core strengths
+    top_fixes: list[str]            # Key improvement opportunities
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# DETERMINISTIC SCORING ENGINE
-# ══════════════════════════════════════════════════════════════════════════════
+# Deterministic Readability Scoring Engine
 
 # Corporate buzzwords that hurt readability for neurodivergent users
 JARGON_WORDS: set[str] = {
@@ -310,9 +308,7 @@ def overall_score_and_grade(scores: dict[str, tuple[int, dict]]) -> tuple[int, s
     return total, grade
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# GEMINI — FEEDBACK TEXT ONLY (not scores)
-# ══════════════════════════════════════════════════════════════════════════════
+# Gemini Qualitative Feedback Engine (AI feedback text generation)
 
 def _build_feedback_prompt(req: ProfileScoreRequest, scores: dict) -> str:
     lines = []
@@ -368,7 +364,7 @@ def _strip_code_fences(text: str) -> str:
     return text.strip()
 
 
-# ── Endpoint ──────────────────────────────────────────────────────────────────
+# API Endpoint
 
 @router.post("/profile-score", response_model=ProfileScoreResponse)
 async def score_profile(req: ProfileScoreRequest):
@@ -384,11 +380,11 @@ async def score_profile(req: ProfileScoreRequest):
     if not api_key:
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY not configured")
 
-    # ── Step 1: Calculate scores deterministically ────────────────────────────
+    # Step 1: Calculate scores deterministically
     scores = calculate_scores(req)
     total, grade = overall_score_and_grade(scores)
 
-    # ── Step 2: Ask Gemini only for feedback text ─────────────────────────────
+    # Step 2: Ask Gemini only for qualitative feedback text
     raw_text: str | None = None
     feedback = None
     try:

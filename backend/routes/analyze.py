@@ -22,7 +22,7 @@ router = APIRouter()
 
 MAX_JD_CHARS = 20_000  # guard against absurdly large payloads
 
-# ── Request / Response Models ────────────────────────────────────────────────
+# Request and Response Models
 
 class AnalyzeRequest(BaseModel):
     job_description: str
@@ -45,26 +45,22 @@ class BiasFlag(BaseModel):
 
 
 class AnalyzeResponse(BaseModel):
-    # Core info
     title: str
     company: str
 
-    # Accessibility analysis
-    sensory_load_score: int          # 1-10 (10 = most overwhelming)
-    sensory_load_explanation: str    # why this score
-    bias_flags: list[BiasFlag]      # exclusionary language detected
+    sensory_load_score: int          # 1-10 scale (10 = most overwhelming)
+    sensory_load_explanation: str    # explanation of the score
+    bias_flags: list[BiasFlag]      # list of exclusionary language found
 
-    # Simplified version
-    simplified_summary: str          # plain-language, short paragraphs
-    key_highlights: list[str]        # bullet-point must-knows
+    simplified_summary: str          # plain language summary
+    key_highlights: list[str]        # bullet points
 
-    # Skills & matching
     key_skills: list[str]
-    experience_level: str            # entry / mid / senior
-    match_tips: list[str]            # actionable advice for applicant
+    experience_level: str            # entry, mid, or senior
+    match_tips: list[str]            # actionable tips for candidate
 
 
-# ── Gemini Prompt ────────────────────────────────────────────────────────────
+# Gemini Prompt
 
 SYSTEM_PROMPT = """\
 You are an accessibility expert who helps neurodivergent job seekers \
@@ -115,15 +111,15 @@ IMPORTANT: Return ONLY valid JSON. No markdown. No explanation outside the JSON.
 
 
 def _strip_code_fences(text: str) -> str:
-    """Remove markdown code fences (with optional language tag) from a string."""
+    """Remove markdown code fences if present in Gemini output."""
     text = re.sub(r"^```[a-zA-Z]*\n?", "", text.strip())
     text = re.sub(r"\n?```$", "", text.strip())
     return text.strip()
 
 
-# ── Endpoint ─────────────────────────────────────────────────────────────────
+# API Endpoint
 
-# Try gemini-2.5-flash first (best quality + JSON mode), fall back if unavailable.
+# Try gemini-2.5-flash first for best quality, fall back to other models if needed.
 MODELS_TO_TRY = [
     "gemini-2.5-flash",
     "gemini-2.0-flash",

@@ -22,7 +22,7 @@ const DEFAULT_SIMPLIFY_PREFS = {
     enabled: true,
 };
 
-// ── Focus Lock ────────────────────────────────────────────────────────────────
+// Focus Lock Timer
 
 let popupTimerInterval = null;
 
@@ -107,7 +107,7 @@ chrome.storage.local.get(['intentLock', 'lockActive', 'lockEndTime', 'lockDurati
     }
 });
 
-// ── Job Analyzer ──────────────────────────────────────────────────────────────
+// Job Analyzer Integration
 
 document.getElementById('analyzeBtn').addEventListener('click', async () => {
     const btn = document.getElementById('analyzeBtn');
@@ -168,7 +168,7 @@ document.getElementById('analyzeBtn').addEventListener('click', async () => {
     }
 });
 
-// ── Profile Accessibility Score ───────────────────────────────────────────────
+// Profile Accessibility Score
 
 document.getElementById('profileScoreBtn').addEventListener('click', async () => {
     const btn = document.getElementById('profileScoreBtn');
@@ -227,7 +227,7 @@ document.getElementById('profileScoreBtn').addEventListener('click', async () =>
     }
 });
 
-// ── Post Simplifier ───────────────────────────────────────────────────────────
+// Post Simplifier Preferences
 
 async function sendSimplifyPrefsToActiveTab(prefs) {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -257,7 +257,7 @@ chrome.storage.local.get(['simplifyPrefs'], (data) => {
     if (toggle) toggle.checked = prefs.enabled;
 });
 
-// ── Reading Modes ─────────────────────────────────────────────────────────────
+// Reading Modes Preferences
 
 function getReadingPrefsFromForm() {
     const prefs = { ...DEFAULT_READING_PREFS };
@@ -307,7 +307,7 @@ chrome.storage.local.get(['readingPrefs'], (data) => {
     setReadingPrefsOnForm(prefs);
 });
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// UI Status Helpers
 
 function setStatus(id, msg, type) {
     const el = document.getElementById(id);
@@ -316,7 +316,7 @@ function setStatus(id, msg, type) {
     el.className = 'status' + (type ? ' ' + type : '');
 }
 
-// ── Visual Alerts ─────────────────────────────────────────────────────────────
+// Visual Alerts / Flash Notifications
 
 const alertsToggle = document.getElementById('alertsToggle');
 const alertColorPicker = document.getElementById('alertColor');
@@ -421,7 +421,7 @@ document.getElementById('testFlashBtn').addEventListener('click', async () => {
     }
 });
 
-// ── Image Describer ──
+// Image Describer Preference
 chrome.storage.local.get(['imageDescriberEnabled'], (data) => {
     const toggle = document.getElementById('imageDescriberToggle');
     if (toggle) toggle.checked = Boolean(data.imageDescriberEnabled);
@@ -443,7 +443,7 @@ document.getElementById('imageDescriberToggle')?.addEventListener('change', asyn
     });
 });
 
-// ── Tabs Switching Logic ──────────────────────────────────────────────────────
+// Tab Navigation Logic
 
 const tabToolsBtn = document.getElementById('tab-tools-btn');
 const tabSavedBtn = document.getElementById('tab-saved-btn');
@@ -468,7 +468,7 @@ function switchTab(activeTab) {
 tabToolsBtn?.addEventListener('click', () => switchTab('tools'));
 tabSavedBtn?.addEventListener('click', () => switchTab('saved'));
 
-// ── Saved Jobs Tracker State & Rendering ──────────────────────────────────────
+// Saved Jobs State & Rendering
 
 function updateBadgeCount() {
     chrome.storage.local.get(['savedJobs'], (data) => {
@@ -597,7 +597,7 @@ function renderSavedJobs() {
     });
 }
 
-// ── Helper Operations ─────────────────────────────────────────────────────────
+// Saved Jobs Operations
 
 function deleteSavedJob(id) {
     chrome.storage.local.get(['savedJobs'], (data) => {
@@ -653,7 +653,7 @@ document.getElementById('savedJobsSort')?.addEventListener('change', renderSaved
 // Initialize badge count on popup load
 updateBadgeCount();
 
-// ── Session Focus / Intent Lock Suggestion ─────────────────────────────────────
+// Focus Lock Suggestions
 
 function updateFocusLockRecommendation() {
     chrome.storage.local.get(['lockActive', 'savedJobs'], (data) => {
