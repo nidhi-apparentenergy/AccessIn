@@ -215,8 +215,13 @@ document.getElementById('profileScoreBtn').addEventListener('click', async () =>
             }
         }
 
-        if (!profileData || (!profileData.headline && !profileData.about && !profileData.experience)) {
-            setStatus('profileScoreStatus', 'No profile content found.', 'error');
+        const hasContent = profileData &&
+            ((profileData.headline || '').trim().length > 0 ||
+             (profileData.about    || '').trim().length > 0 ||
+             (profileData.experience || '').trim().length > 0);
+
+        if (!hasContent) {
+            setStatus('profileScoreStatus', 'No profile content found. Make sure you\'re on a LinkedIn profile page and it has fully loaded.', 'error');
             return;
         }
 

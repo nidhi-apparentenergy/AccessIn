@@ -2238,7 +2238,13 @@ window.setTimeout(() => {
 // ==========================================
 
 function extractProfileContent() {
-    const profile = {};
+    const profile = {
+        name: '',
+        headline: '',
+        about: '',
+        experience: '',
+        profile_url: window.location.href,
+    };
 
     // ── Helper: get clean text from an element, stripping button/nav noise ───
     function cleanText(el) {
@@ -2253,6 +2259,43 @@ function extractProfileContent() {
         return clone.innerText?.trim() || '';
     }
 
+    // ── Helper: find a section by its heading text ────────────────────────────
+    // LinkedIn uses <div id="about"> / <div id="experience"> as anchor targets,
+    // but the actual section content lives in the nearest ancestor <section>.
+    // We also try matching by visible heading text as a robust fallback.
+    function findSectionByHeading(headingText) {
+        // Strategy 1: anchor element by id (most reliable when present)
+        const anchor = document.getElementById(headingText.toLowerCase());
+        if (anchor) {
+            // Walk up to find the enclosing section (may be several levels up)
+            let el = anchor;
+            for (let i = 0; i < 6; i++) {
+                el = el.parentElement;
+                if (!el) break;
+                if (el.tagName === 'SECTION') return el;
+                // LinkedIn sometimes uses <div> with role="region" instead of <section>
+                if (el.getAttribute('role') === 'region') return el;
+            }
+            // If no section found, return the anchor's parent as best effort
+            return anchor.parentElement;
+        }
+
+        // Strategy 2: find a heading element whose text matches
+        const headings = document.querySelectorAll('h2, h3, [class*="section-title"], [class*="pv-section-header"]');
+        for (const h of headings) {
+            if (h.innerText?.trim().toLowerCase() === headingText.toLowerCase()) {
+                // Walk up to the nearest section/region
+                let el = h;
+                for (let i = 0; i < 6; i++) {
+                    el = el.parentElement;
+                    if (!el) break;
+                    if (el.tagName === 'SECTION' || el.getAttribute('role') === 'region') return el;
+                }
+            }
+        }
+        return null;
+    }
+
     // ── Name ─────────────────────────────────────────────────────────────────
     const nameEl =
         document.querySelector('h1.text-heading-xlarge') ||
@@ -2262,22 +2305,27 @@ function extractProfileContent() {
     profile.name = nameEl?.innerText?.trim() || '';
 
     // ── Headline ──────────────────────────────────────────────────────────────
-    // Headline is the div directly after the h1 with the person's tagline
+    // Try multiple selectors — LinkedIn changes class names frequently
     const headlineEl =
         document.querySelector('.text-body-medium.break-words') ||
         document.querySelector('[data-generated-suggestion-target]') ||
-        document.querySelector('.pv-top-card-section__headline');
+        document.querySelector('.pv-top-card-section__headline') ||
+        document.querySelector('[class*="top-card-layout__headline"]') ||
+        document.querySelector('[class*="profile-info-subheader"]') ||
+        document.querySelector('.pv-text-details__left-panel .text-body-medium');
 
     if (headlineEl) {
         profile.headline = headlineEl.innerText?.trim() || '';
-    } else if (nameEl) {
-        // Walk siblings after h1 — first short text that isn't location/connections
+    }
+
+    // Fallback: walk siblings after h1 — first short text that isn't location/connections
+    if (!profile.headline && nameEl) {
         let sib = nameEl.nextElementSibling;
-        while (sib) {
+        for (let i = 0; i < 5 && sib; i++) {
             const t = sib.innerText?.trim() || '';
-            // Skip location lines, connection counts, pronouns
             if (t.length > 10 && t.length < 300 && !/^\d+/.test(t) &&
-                !t.includes('connection') && !t.includes('follower')) {
+                !t.includes('connection') && !t.includes('follower') &&
+                !t.includes('mutual')) {
                 profile.headline = t;
                 break;
             }
@@ -2286,20 +2334,17 @@ function extractProfileContent() {
     }
 
     // ── About ─────────────────────────────────────────────────────────────────
-    // Use the #about anchor — it's a reliable landmark LinkedIn always includes
-    const aboutAnchor = document.getElementById('about');
-    if (aboutAnchor) {
-        const section = aboutAnchor.closest('section') || aboutAnchor.parentElement;
-        if (section) {
-            const text = cleanText(section).replace(/^About\s*/i, '').trim();
-            // Must be real content — not just the heading
-            if (text.length > 20) profile.about = text.slice(0, 2000);
-        }
+    const aboutSection = findSectionByHeading('about');
+    if (aboutSection) {
+        const text = cleanText(aboutSection).replace(/^About\s*/i, '').trim();
+        if (text.length > 20) profile.about = text.slice(0, 2000);
     }
 
-    // Fallback: section with data-view-name containing "about"
+    // Fallback: data-view-name attribute
     if (!profile.about) {
-        const el = document.querySelector('[data-view-name*="profile-card-about"]');
+        const el =
+            document.querySelector('[data-view-name*="profile-card-about"]') ||
+            document.querySelector('[data-view-name*="about"]');
         if (el) {
             const text = cleanText(el).replace(/^About\s*/i, '').trim();
             if (text.length > 20) profile.about = text.slice(0, 2000);
@@ -2307,26 +2352,38 @@ function extractProfileContent() {
     }
 
     // ── Experience ────────────────────────────────────────────────────────────
-    const expAnchor = document.getElementById('experience');
-    if (expAnchor) {
-        const section = expAnchor.closest('section') || expAnchor.parentElement;
-        if (section) {
-            const text = cleanText(section).replace(/^Experience\s*/i, '').trim();
-            if (text.length > 20) profile.experience = text.slice(0, 2000);
-        }
+    const expSection = findSectionByHeading('experience');
+    if (expSection) {
+        const text = cleanText(expSection).replace(/^Experience\s*/i, '').trim();
+        if (text.length > 20) profile.experience = text.slice(0, 2000);
     }
 
     if (!profile.experience) {
-        const el = document.querySelector('[data-view-name*="profile-card-experience"]');
+        const el =
+            document.querySelector('[data-view-name*="profile-card-experience"]') ||
+            document.querySelector('[data-view-name*="experience"]');
         if (el) {
             const text = cleanText(el).replace(/^Experience\s*/i, '').trim();
             if (text.length > 20) profile.experience = text.slice(0, 2000);
         }
     }
 
-    // ── NOTE: No "last resort" full-page grab ─────────────────────────────────
-    // Grabbing <main> pulls in LinkedIn UI buttons, suggestions, ads etc.
-    // which pollutes the scoring. If we have at least a headline, that's enough.
+    // ── Last-resort: grab visible text from the top card ─────────────────────
+    // If we still have nothing useful, pull text from the profile top card.
+    // This is better than returning empty and showing "No profile content found."
+    if (!profile.headline && !profile.about && !profile.experience) {
+        const topCard =
+            document.querySelector('.pv-top-card') ||
+            document.querySelector('[class*="top-card-layout"]') ||
+            document.querySelector('main section:first-of-type');
+        if (topCard) {
+            const text = cleanText(topCard).trim();
+            if (text.length > 20) {
+                // Use first 300 chars as headline proxy
+                profile.headline = text.slice(0, 300);
+            }
+        }
+    }
 
     profile.profile_url = window.location.href;
     return profile;
