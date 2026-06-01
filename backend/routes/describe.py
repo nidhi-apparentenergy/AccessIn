@@ -21,16 +21,16 @@ router = APIRouter()
 
 MAX_IMAGE_B64_CHARS = 10 * 1024 * 1024  # ~7.5 MB decoded — reasonable upper bound
 
-# Data Models
+# ── Models ────────────────────────────────────────────────────────────────────
 
 class DescribeRequest(BaseModel):
-    image_b64: str          # base64-encoded image bytes
+    image_b64: str          # base64-encoded image bytes (no data URI prefix)
     mime_type: str = "image/jpeg"
-    context: str = ""       # optional surrounding text
+    context: str = ""       # optional surrounding text (alt, aria-label, caption)
 
     @field_validator("image_b64")
     @classmethod
-    def not_empty_and_not_too_long(cls, v: str) -> str:
+    def not_empty_and_not_too_large(cls, v: str) -> str:
         v = v.strip()
         if not v:
             raise ValueError("image_b64 cannot be empty")
@@ -40,11 +40,11 @@ class DescribeRequest(BaseModel):
 
 
 class DescribeResponse(BaseModel):
-    description: str        # description for screen readers
-    short_alt: str          # concise alt text (max 125 chars)
+    description: str        # plain-English description for screen readers
+    short_alt: str          # concise alt text (≤ 125 chars)
 
 
-# Gemini Vision Prompt
+# ── Prompt ────────────────────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = """\
 You are an accessibility expert writing image descriptions for blind and \
@@ -72,13 +72,13 @@ Rules:
 
 
 def _strip_code_fences(text: str) -> str:
-    """Remove markdown code fences from a string."""
+    """Remove markdown code fences (with optional language tag) from a string."""
     text = re.sub(r"^```[a-zA-Z]*\n?", "", text.strip())
     text = re.sub(r"\n?```$", "", text.strip())
     return text.strip()
 
 
-# API Endpoint
+# ── Endpoint ──────────────────────────────────────────────────────────────────
 
 # Try gemini-2.5-flash first (supports vision), fall back if unavailable.
 MODELS_TO_TRY = [

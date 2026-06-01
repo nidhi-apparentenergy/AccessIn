@@ -1149,7 +1149,14 @@ window.setTimeout(() => {
 // FEATURE 4: JOB ANALYZER
 // ==========================================
 
+function getActiveJobDetailsContainer() {
+    return document.querySelector(
+        '.jobs-search__job-details, .job-details, [class*="job-details"], .scaffold-layout__detail, main'
+    ) || document;
+}
+
 function extractJobDescription() {
+    const container = getActiveJobDetailsContainer();
     const stableSelectors = [
         '.jobs-description__content',
         '.jobs-description-content__text',
@@ -1158,7 +1165,7 @@ function extractJobDescription() {
         '.description__text',
     ];
     for (const sel of stableSelectors) {
-        const el = document.querySelector(sel);
+        const el = container.querySelector(sel);
         if (el && el.innerText.trim().length > 100) return el.innerText.trim();
     }
 
@@ -1758,6 +1765,21 @@ function findLinkedInPosts() {
         let el = btn.parentElement;
         for (let i = 0; i < 12; i++) {
             if (!el || el === document.body) break;
+
+            // Skip comments and comment list containers to avoid clutter
+            if (el.closest && (
+                el.closest('.comments-comment-item') ||
+                el.closest('.comments-comments-list') ||
+                el.closest('.feed-shared-comments-container') ||
+                el.closest('.comments-comment-box') ||
+                el.closest('[class*="comments-comment"]') ||
+                el.closest('[class*="comments-list"]') ||
+                el.closest('[class*="comments-reply"]') ||
+                el.closest('.reply-item')
+            )) {
+                break;
+            }
+
             const urn = el.getAttribute('data-urn') || el.getAttribute('data-id') || '';
             const cls = (el.className || '').toString();
             const tag = el.tagName;
@@ -1819,9 +1841,18 @@ function renderSimplifiedPanel(data) {
 
     return `
         <div class="accessplus-simplified-title">Simplified version</div>
-        <div>${escapeHTML(data.simplified_text)}</div>
-        ${keyPoints ? `<ul>${keyPoints}</ul>` : ''}
-        <div class="accessplus-simplified-action">Action: ${escapeHTML(data.action_needed || 'No action needed')}</div>
+        <div class="accessplus-simplified-body" style="margin-bottom: 8px;">${escapeHTML(data.simplified_text)}</div>
+        ${keyPoints ? `<ul style="margin: 6px 0 10px 18px; padding: 0;">${keyPoints}</ul>` : ''}
+        <div class="accessplus-simplified-action" style="font-weight: 700; margin-bottom: 12px;">Action: ${escapeHTML(data.action_needed || 'No action needed')}</div>
+        
+        <div class="accessplus-qa-section" style="margin-top: 12px; border-top: 1px dashed #cbd5e1; padding-top: 10px;">
+            <div style="font-weight: 700; font-size: 12px; color: #475569; margin-bottom: 6px;">🤔 Ask a follow-up question:</div>
+            <div style="display: flex; gap: 6px;">
+                <input type="text" class="accessplus-qa-input" placeholder="e.g., Is remote allowed? When is the deadline?" style="flex: 1; padding: 6px 10px; font-size: 12px; border: 1px solid #cbd5e1; border-radius: 12px; outline: none; box-sizing: border-box;" />
+                <button type="button" class="accessplus-qa-submit-btn" style="padding: 6px 14px; font-size: 11px; font-weight: 700; background: #0a66c2; color: white; border: none; border-radius: 12px; cursor: pointer; transition: background 0.15s;">Ask</button>
+            </div>
+            <div class="accessplus-qa-answer" style="margin-top: 8px; font-size: 12px; color: #1e293b; font-style: italic; line-height: 1.45;"></div>
+        </div>
     `;
 }
 
@@ -1844,7 +1875,38 @@ async function simplifyPostText(text, button, panel) {
 
         const data = await response.json();
         panel.innerHTML = renderSimplifiedPanel(data);
-        button.textContent = 'Simplified';
+        button.textContent = 'Simplified ✓';
+
+        // Bind event listeners for the follow-up Q&A
+        const qaInput = panel.querySelector('.accessplus-qa-input');
+        const qaSubmit = panel.querySelector('.accessplus-qa-submit-btn');
+        const qaAnswer = panel.querySelector('.accessplus-qa-answer');
+
+        qaSubmit?.addEventListener('click', async () => {
+            const question = qaInput.value.trim();
+            if (!question) return;
+
+            qaSubmit.disabled = true;
+            qaSubmit.textContent = '...';
+            qaAnswer.innerHTML = '<span style="color: #6b7c8f;">Thinking...</span>';
+
+            try {
+                const qaRes = await fetch('http://localhost:8000/ask', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text, question }),
+                });
+
+                if (!qaRes.ok) throw new Error('Q&A failed');
+                const qaData = await qaRes.json();
+                qaAnswer.innerHTML = `💡 <strong>Answer:</strong> ${escapeHTML(qaData.answer)}`;
+            } catch (err) {
+                qaAnswer.innerHTML = '<span style="color: #c0392b;">⚠️ Could not get an answer. Try again.</span>';
+            } finally {
+                qaSubmit.disabled = false;
+                qaSubmit.textContent = 'Ask';
+            }
+        });
     } catch (error) {
         panel.innerHTML = `
             <div class="accessplus-simplified-title">Could not simplify</div>
@@ -1981,6 +2043,7 @@ function ensureReadingModeStyles() {
     const style = document.createElement('style');
     style.id = 'accessplus-reading-mode-styles';
     style.textContent = `
+        /* Larger Text Support */
         html.accessplus-larger-text body,
         html.accessplus-larger-text p,
         html.accessplus-larger-text span,
@@ -1988,19 +2051,36 @@ function ensureReadingModeStyles() {
         html.accessplus-larger-text a,
         html.accessplus-larger-text button,
         html.accessplus-larger-text input,
-        html.accessplus-larger-text textarea {
+        html.accessplus-larger-text textarea,
+        html.accessplus-larger-text div,
+        html.accessplus-larger-text h1,
+        html.accessplus-larger-text h2,
+        html.accessplus-larger-text h3,
+        html.accessplus-larger-text h4,
+        html.accessplus-larger-text h5,
+        html.accessplus-larger-text h6 {
             font-size: 18px !important;
         }
 
+        /* Increased Spacing Support */
         html.accessplus-spacing body,
         html.accessplus-spacing p,
         html.accessplus-spacing span,
-        html.accessplus-spacing li {
+        html.accessplus-spacing li,
+        html.accessplus-spacing div,
+        html.accessplus-spacing a,
+        html.accessplus-spacing h1,
+        html.accessplus-spacing h2,
+        html.accessplus-spacing h3,
+        html.accessplus-spacing h4,
+        html.accessplus-spacing h5,
+        html.accessplus-spacing h6 {
             line-height: 1.8 !important;
             letter-spacing: 0.04em !important;
             word-spacing: 0.12em !important;
         }
 
+        /* Dyslexia-Friendly Font Support */
         html.accessplus-dyslexia-font body,
         html.accessplus-dyslexia-font p,
         html.accessplus-dyslexia-font span,
@@ -2008,10 +2088,18 @@ function ensureReadingModeStyles() {
         html.accessplus-dyslexia-font a,
         html.accessplus-dyslexia-font button,
         html.accessplus-dyslexia-font input,
-        html.accessplus-dyslexia-font textarea {
+        html.accessplus-dyslexia-font textarea,
+        html.accessplus-dyslexia-font div,
+        html.accessplus-dyslexia-font h1,
+        html.accessplus-dyslexia-font h2,
+        html.accessplus-dyslexia-font h3,
+        html.accessplus-dyslexia-font h4,
+        html.accessplus-dyslexia-font h5,
+        html.accessplus-dyslexia-font h6 {
             font-family: Verdana, Arial, Tahoma, sans-serif !important;
         }
 
+        /* High Contrast Support */
         html.accessplus-high-contrast body {
             background: #ffffff !important;
             color: #111111 !important;
@@ -2022,8 +2110,14 @@ function ensureReadingModeStyles() {
         html.accessplus-high-contrast article,
         html.accessplus-high-contrast div[class*="feed"],
         html.accessplus-high-contrast div[class*="jobs"],
-        html.accessplus-high-contrast div[class*="msg"] {
+        html.accessplus-high-contrast div[class*="msg"],
+        html.accessplus-high-contrast div[class*="notification"],
+        html.accessplus-high-contrast div[class*="comment"],
+        html.accessplus-high-contrast [class*="msg-"],
+        html.accessplus-high-contrast [class*="notification-"],
+        html.accessplus-high-contrast [class*="nt-card"] {
             background-color: #ffffff !important;
+            background: #ffffff !important;
             color: #111111 !important;
         }
 
@@ -2037,6 +2131,7 @@ function ensureReadingModeStyles() {
             filter: contrast(1.15) saturate(1.05) !important;
         }
 
+        /* Reduce Motion */
         html.accessplus-reduce-motion *,
         html.accessplus-reduce-motion *::before,
         html.accessplus-reduce-motion *::after {
@@ -2046,6 +2141,7 @@ function ensureReadingModeStyles() {
             transition-duration: 0.001s !important;
         }
 
+        /* Hide Clutter */
         html.accessplus-hide-clutter aside,
         html.accessplus-hide-clutter [class*="right-rail"],
         html.accessplus-hide-clutter [class*="ad-banner"],
@@ -2855,19 +2951,24 @@ setInterval(() => {
 
 function startInlineButtonScan() {
     window.setInterval(() => {
-        if (document.getElementById('accessin-inline-analyze-btn')) return;
+        const container = getActiveJobDetailsContainer();
+        if (!container) return;
 
-        // Try several standard action headers and buttons on LinkedIn job detail panes
-        const actionsEl = document.querySelector(
+        // Try standard action headers and buttons inside the active details container
+        const actionsEl = container.querySelector(
             '.jobs-apply-button--top-card, ' +
+            '.jobs-apply-button, ' +
             '.jobs-save-button, ' +
             '[class*="top-card-layout__actions"], ' +
-            '[class*="jobs-unified-top-card__content-container"] [class*="actions"]'
+            '[class*="jobs-unified-top-card__content-container"] [class*="actions"], ' +
+            '.jobs-actions'
         );
 
         if (actionsEl) {
             const parent = actionsEl.parentElement;
             if (parent && !parent.querySelector('#accessin-inline-analyze-btn')) {
+                // Clear any outdated inline buttons on the page to prevent duplicate triggers
+                document.getElementById('accessin-inline-analyze-btn')?.remove();
                 const btn = document.createElement('button');
                 btn.id = 'accessin-inline-analyze-btn';
                 btn.type = 'button';

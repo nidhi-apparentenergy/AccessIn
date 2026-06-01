@@ -92,3 +92,44 @@ async def simplify_text(req: SimplifyRequest):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Simplify failed: {e}")
+
+
+class AskRequest(BaseModel):
+    text: str
+    question: str
+
+
+@router.post("/ask")
+async def ask_question(req: AskRequest):
+    """Answer a user's follow-up question about a simplified post."""
+    if not req.text.strip() or not req.question.strip():
+        raise HTTPException(status_code=400, detail="text and question cannot be empty")
+
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY not configured")
+
+    try:
+        client = genai.Client(api_key=api_key)
+
+        prompt = f"""Based on this LinkedIn post, answer the following question in a short, clear, plain-language way suitable for cognitive ease (ADHD/autistic readers). Keep the answer concise (max 3 sentences).
+
+Post:
+{req.text[:3000]}
+
+Question:
+{req.question}"""
+
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config=genai.types.GenerateContentConfig(
+                temperature=0.3,
+                max_output_tokens=500,
+            ),
+        )
+
+        return {"answer": response.text.strip()}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

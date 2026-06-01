@@ -118,7 +118,7 @@ document.getElementById('analyzeBtn').addEventListener('click', async () => {
     try {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
-        if (!tab.url || !tab.url.includes('linkedin.com')) {
+        if (!tab.url || (!tab.url.includes('linkedin.com') && !tab.url.startsWith('file:///'))) {
             setStatus('analyzeStatus', 'Open a LinkedIn job posting first.', 'error');
             return;
         }
@@ -128,8 +128,19 @@ document.getElementById('analyzeBtn').addEventListener('click', async () => {
             const resp = await chrome.tabs.sendMessage(tab.id, { type: 'GET_JOB_DESCRIPTION' });
             jd = resp?.jd;
         } catch {
-            setStatus('analyzeStatus', 'Could not read the page. Try refreshing LinkedIn.', 'error');
-            return;
+            // Programmatically inject content script if not already loaded (useful for offline files)
+            try {
+                await chrome.scripting.executeScript({
+                    target: { tabId: tab.id },
+                    files: ['content/content.js']
+                });
+                await new Promise(r => setTimeout(r, 200));
+                const resp = await chrome.tabs.sendMessage(tab.id, { type: 'GET_JOB_DESCRIPTION' });
+                jd = resp?.jd;
+            } catch (err) {
+                setStatus('analyzeStatus', 'Could not read the page. Try refreshing LinkedIn.', 'error');
+                return;
+            }
         }
 
         if (!jd) {
@@ -179,7 +190,7 @@ document.getElementById('profileScoreBtn').addEventListener('click', async () =>
     try {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
-        if (!tab.url || !tab.url.includes('linkedin.com/in/')) {
+        if (!tab.url || (!tab.url.includes('linkedin.com') && !tab.url.startsWith('file:///'))) {
             setStatus('profileScoreStatus', 'Open a LinkedIn profile page first.', 'error');
             return;
         }
@@ -189,8 +200,19 @@ document.getElementById('profileScoreBtn').addEventListener('click', async () =>
             const resp = await chrome.tabs.sendMessage(tab.id, { type: 'GET_PROFILE_CONTENT' });
             profileData = resp?.profile;
         } catch {
-            setStatus('profileScoreStatus', 'Could not read the page. Try refreshing.', 'error');
-            return;
+            // Programmatically inject content script if not already loaded (useful for offline files)
+            try {
+                await chrome.scripting.executeScript({
+                    target: { tabId: tab.id },
+                    files: ['content/content.js']
+                });
+                await new Promise(r => setTimeout(r, 200));
+                const resp = await chrome.tabs.sendMessage(tab.id, { type: 'GET_PROFILE_CONTENT' });
+                profileData = resp?.profile;
+            } catch (err) {
+                setStatus('profileScoreStatus', 'Could not read the page. Try refreshing.', 'error');
+                return;
+            }
         }
 
         if (!profileData || (!profileData.headline && !profileData.about && !profileData.experience)) {
